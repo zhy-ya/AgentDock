@@ -32,6 +32,8 @@ import { PromptEditors } from "./PromptEditors";
 
 type View = "prompts" | "backups";
 const MIN_REFRESH_FEEDBACK_MS = 650;
+const STATUS_TOAST_MS = 2200;
+const ERROR_TOAST_MS = 3600;
 
 export function PromptSyncLayout() {
   const {
@@ -70,6 +72,22 @@ export function PromptSyncLayout() {
     void init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!statusMessage) return;
+    const timer = window.setTimeout(() => {
+      setStatusMessage("");
+    }, STATUS_TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage, setStatusMessage]);
+
+  useEffect(() => {
+    if (!errorMessage) return;
+    const timer = window.setTimeout(() => {
+      setErrorMessage("");
+    }, ERROR_TOAST_MS);
+    return () => window.clearTimeout(timer);
+  }, [errorMessage, setErrorMessage]);
 
   const captureSourcePromptSnapshots = useCallback(async () => {
     const snapshots = await Promise.all(
@@ -153,7 +171,7 @@ export function PromptSyncLayout() {
       <div
         data-tauri-drag-region
         onMouseDown={onDragRegionMouseDown}
-        className="fixed inset-x-0 top-0 z-40 h-11 cursor-grab active:cursor-grabbing"
+        className="fixed inset-x-0 top-0 z-40 h-11 cursor-grab select-none active:cursor-grabbing"
       />
       <BackgroundOrbs />
 
