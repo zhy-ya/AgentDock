@@ -1,9 +1,11 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use crate::files::{read_text, write_atomic_bytes};
+use crate::files::{now_millis, read_text, write_atomic_bytes};
 use crate::paths::backups_root;
-use crate::types::{BackupDetail, BackupDetailEntry, BackupInfo, BackupManifest, RestoreResult};
+use crate::types::{
+    BackupDetail, BackupDetailEntry, BackupEntry, BackupInfo, BackupManifest, RestoreResult,
+};
 use crate::workspace::ensure_workspace_layout;
 
 fn load_backup_manifest(backup_id: &str) -> Result<(PathBuf, BackupManifest), String> {
@@ -51,32 +53,121 @@ pub fn list_backups_inner() -> Result<Vec<BackupInfo>, String> {
     Ok(items)
 }
 
+#[derive(Clone)]
+enum RestoreAction {
+    Write(Vec<u8>),
+    Delete,
+    None,
+}
+
 pub fn restore_backup_inner(backup_id: String) -> Result<RestoreResult, String> {
     ensure_workspace_layout()?;
     let (backup_dir, manifest) = load_backup_manifest(&backup_id)?;
-    let mut restored = 0;
 
+    let mut planned: Vec<(BackupEntry, RestoreAction)> = Vec::new();
     for entry in &manifest.entries {
         let target = PathBuf::from(&entry.target_absolute_path);
         if entry.existed_before {
             let backup_file = backup_dir
                 .join(&entry.agent)
-                .join(std::path::Path::new(&entry.target_relative_path));
+                .join(Path::new(&entry.target_relative_path));
             if !backup_file.exists() {
                 continue;
             }
-            let original = fs::read(&backup_file).map_err(|e| e.to_string())?;
-            write_atomic_bytes(&target, &original)?;
-            restored += 1;
-        } else if target.exists() {
-            fs::remove_file(&target).map_err(|e| e.to_string())?;
-            restored += 1;
+
+            let desired = fs::read(&backup_file).map_err(|e| e.to_string())?;
+            let action = if target.exists() {
+                let current = fs::read(&target).map_err(|e| e.to_string())?;
+                if current == desired {
+                    RestoreAction::None
+                } else {
+                    RestoreAction::Write(desired)
+                }
+            } else {
+                RestoreAction::Write(desired)
+            };
+
+            planned.push((entry.clone(), action));
+        } else {
+            let action = if target.exists() {
+                RestoreAction::Delete
+            } else {
+                RestoreAction::None
+            };
+            planned.push((entry.clone(), action));
+        }
+    }
+
+    let changed: Vec<(BackupEntry, RestoreAction)> = planned
+        .into_iter()
+        .filter(|(_, action)| !matches!(action, RestoreAction::None))
+        .collect();
+    create_pre_restore_backup(&changed, &backup_id)?;
+
+    let mut restored = 0;
+    for (entry, action) in changed {
+        let target = PathBuf::from(&entry.target_absolute_path);
+        match action {
+            RestoreAction::Write(content) => {
+                write_atomic_bytes(&target, &content)?;
+                restored += 1;
+            }
+            RestoreAction::Delete => {
+                if target.exists() {
+                    fs::remove_file(&target).map_err(|e| e.to_string())?;
+                    restored += 1;
+                }
+            }
+            RestoreAction::None => {}
         }
     }
 
     Ok(RestoreResult {
         restored_count: restored,
     })
+}
+
+fn create_pre_restore_backup(
+    changes: &[(BackupEntry, RestoreAction)],
+    source_backup_id: &str,
+) -> Result<(), String> {
+    if changes.is_empty() {
+        return Ok(());
+    }
+
+    let backup_id = now_millis()?.to_string();
+    let backup_dir = backups_root()?.join(&backup_id);
+    fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
+
+    let mut entries = Vec::new();
+    for (entry, _) in changes {
+        let target = PathBuf::from(&entry.target_absolute_path);
+        let existed_before = target.exists();
+        if existed_before {
+            let backup_file = backup_dir
+                .join(&entry.agent)
+                .join(Path::new(&entry.target_relative_path));
+            let current = fs::read(&target).map_err(|e| e.to_string())?;
+            write_atomic_bytes(&backup_file, &current)?;
+        }
+
+        entries.push(BackupEntry {
+            agent: entry.agent.clone(),
+            target_relative_path: entry.target_relative_path.clone(),
+            target_absolute_path: entry.target_absolute_path.clone(),
+            existed_before,
+        });
+    }
+
+    let manifest = BackupManifest {
+        backup_id,
+        created_at: now_millis()?,
+        trigger: format!("pre_restore:{source_backup_id}"),
+        entries,
+    };
+    let payload = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    write_atomic_bytes(&backup_dir.join("manifest.json"), payload.as_bytes())?;
+    Ok(())
 }
 
 pub fn delete_backup_inner(backup_id: String) -> Result<(), String> {

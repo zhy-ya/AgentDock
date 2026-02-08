@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
@@ -38,8 +38,12 @@ export function PromptSyncLayout() {
   const { editors, dirty, loadAll, updateContent, saveAll } =
     usePromptEditors(setStatusMessage, setErrorMessage);
 
+  const onRestored = useCallback(async () => {
+    await loadAll();
+  }, [loadAll]);
+
   const { backupItems, refreshBackups, restoreBackupAction, deleteBackupAction } =
-    useBackups(setStatusMessage, setErrorMessage);
+    useBackups(setStatusMessage, setErrorMessage, { onRestored });
 
   const [view, setView] = useState<View>("prompts");
 

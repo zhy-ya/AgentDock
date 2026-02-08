@@ -2,11 +2,17 @@ import { useState, useCallback } from "react";
 import { listBackups, restoreBackup, deleteBackup } from "@/api";
 import type { BackupInfo } from "@/types";
 
+interface UseBackupsOptions {
+  onRestored?: (backupId: string) => Promise<void> | void;
+}
+
 export function useBackups(
   setStatusMessage: (msg: string) => void,
   setErrorMessage: (msg: string) => void,
+  options: UseBackupsOptions = {},
 ) {
   const [backupItems, setBackupItems] = useState<BackupInfo[]>([]);
+  const { onRestored } = options;
 
   const refreshBackups = useCallback(async () => {
     try {
@@ -21,13 +27,18 @@ export function useBackups(
     async (id: string) => {
       try {
         const r = await restoreBackup(id);
-        setStatusMessage(`恢复完成，${r.restored_count} 个文件`);
+        setStatusMessage(
+          r.restored_count === 0 ? "恢复完成，当前内容与目标备份一致" : `恢复完成，${r.restored_count} 个文件`,
+        );
         await refreshBackups();
+        if (onRestored) {
+          await onRestored(id);
+        }
       } catch (e) {
         setErrorMessage(String(e));
       }
     },
-    [setStatusMessage, setErrorMessage, refreshBackups],
+    [setStatusMessage, setErrorMessage, refreshBackups, onRestored],
   );
 
   const deleteBackupAction = useCallback(
