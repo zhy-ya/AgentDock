@@ -116,7 +116,7 @@ for (const file of ["package.json", "src-tauri/tauri.conf.json"]) {
 }
 ' "$VERSION"
 
-perl -0777 -i -pe 's/(\[package\]\n(?:.*\n)*?version = ")[^"]+(")/$1'"$VERSION"'$2/s' src-tauri/Cargo.toml
+VERSION="$VERSION" perl -0777 -i -pe 's/(\[package\]\n(?:.*?\n)*?version\s*=\s*")[^"]+(")/${1}$ENV{VERSION}${2}/s' src-tauri/Cargo.toml
 
 if ! cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 --no-deps >/dev/null 2>&1; then
   echo "Error: src-tauri/Cargo.toml became invalid after version update."
