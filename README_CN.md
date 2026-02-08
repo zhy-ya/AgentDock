@@ -29,6 +29,7 @@ AgentDock 让你在一个界面里统一编辑提示词，再同步到：
 | Node.js | 18+ |
 | pnpm | 9+ |
 | Rust 工具链 | stable（`rustc`, `cargo`） |
+| GitHub CLI（`gh`） | 最新版 |
 | Tauri 前置依赖 | 参考[官方文档](https://tauri.app/start/prerequisites/) |
 
 ---
@@ -99,4 +100,38 @@ pnpm build
 
 # Tauri 桌面应用
 pnpm tauri dev
+
+# 交互式 GitHub 发布
+pnpm release:github
 ```
+
+---
+
+## 发布
+
+自动发布命令：
+
+```bash
+pnpm release:github
+```
+
+发布说明支持多行输入，按 `Ctrl-D` 结束。
+
+执行前先登录 GitHub CLI：
+
+```bash
+gh auth login -h github.com
+```
+
+命令会交互要求输入：
+
+1. `Version`（例如 `0.1.1`）
+2. `Release notes`（支持多行，输入完成后按 `Ctrl-D`）
+
+之后会自动完成：
+
+1. 更新 `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 的版本号
+2. 构建 macOS app bundle
+3. 生成 `release/AgentDock_<version>_aarch64.app.zip` 及 SHA256 文件
+4. 提交（`release: v<version>`）、打 tag、推送到 GitHub
+5. 创建 GitHub Release 并上传资产

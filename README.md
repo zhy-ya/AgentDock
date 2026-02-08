@@ -29,6 +29,7 @@ AgentDock helps you edit shared instructions once, then sync them to:
 | Node.js | 18+ |
 | pnpm | 9+ |
 | Rust toolchain | stable (`rustc`, `cargo`) |
+| GitHub CLI (`gh`) | latest |
 | Tauri prerequisites | Follow [official guide](https://tauri.app/start/prerequisites/) |
 
 ---
@@ -99,4 +100,38 @@ pnpm build
 
 # tauri desktop app
 pnpm tauri dev
+
+# interactive GitHub release
+pnpm release:github
 ```
+
+---
+
+## Release
+
+Automated release command:
+
+```bash
+pnpm release:github
+```
+
+Release notes support multi-line input; press `Ctrl-D` to finish.
+
+Before running:
+
+```bash
+gh auth login -h github.com
+```
+
+The command will prompt you for:
+
+1. `Version` (for example `0.1.1`)
+2. `Release notes` (multi-line, finish with `Ctrl-D`)
+
+Then it will automatically:
+
+1. Update version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`
+2. Build macOS app bundle
+3. Create `release/AgentDock_<version>_aarch64.app.zip` and SHA256 file
+4. Commit (`release: v<version>`), create tag, and push to GitHub
+5. Create GitHub Release and upload assets
