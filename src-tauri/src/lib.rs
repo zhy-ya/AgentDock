@@ -2,17 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
-use zip::write::FileOptions;
-use zip::{ZipArchive, ZipWriter};
 
 const APP_DIR_NAME: &str = ".ai-config-manager";
 const SOURCE_DIR_NAME: &str = "source";
 const BACKUPS_DIR_NAME: &str = "backups";
-const EXPORTS_DIR_NAME: &str = "exports";
 const MAPPING_FILE_NAME: &str = "mapping.json";
 const CATEGORY_NAMES: [&str; 5] = ["instructions", "skills", "plugins", "commands", "mcp"];
 const LEGACY_PROMPTS_CATEGORY: &str = "prompts";
@@ -47,11 +43,21 @@ struct FileContent {
     content: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "lowercase")]
+enum SyncMode {
+    #[default]
+    Replace,
+    Append,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct CategoryMapping {
     codex: String,
     gemini: String,
     claude: String,
+    #[serde(default)]
+    sync_mode: SyncMode,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -115,49 +121,6 @@ struct RestoreResult {
     restored_count: usize,
 }
 
-#[derive(Debug, Serialize)]
-struct ExportResult {
-    path: String,
-    files: usize,
-    sanitized: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct ImportFilePreview {
-    relative_path: String,
-    status: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ImportPreview {
-    zip_path: String,
-    files: Vec<ImportFilePreview>,
-    has_mapping: bool,
-}
-
-#[derive(Debug, Serialize)]
-struct ImportResult {
-    backup_id: Option<String>,
-    applied_count: usize,
-    skipped_count: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct ShareManifest {
-    version: u32,
-    created_at: u128,
-    sanitized: bool,
-    files: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct AgentEndpoint {
-    agent: String,
-    kind: String,
-    path: String,
-    exists: bool,
-}
-
 fn now_millis() -> Result<u128, String> {
     Ok(SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -183,10 +146,6 @@ fn backups_root() -> Result<PathBuf, String> {
     Ok(app_root()?.join(BACKUPS_DIR_NAME))
 }
 
-fn exports_root() -> Result<PathBuf, String> {
-    Ok(app_root()?.join(EXPORTS_DIR_NAME))
-}
-
 fn mapping_path() -> Result<PathBuf, String> {
     Ok(app_root()?.join(MAPPING_FILE_NAME))
 }
@@ -209,31 +168,37 @@ fn default_category_mapping(category: &str) -> CategoryMapping {
             codex: "AGENTS.md".to_string(),
             gemini: "GEMINI.md".to_string(),
             claude: "CLAUDE.md".to_string(),
+            sync_mode: SyncMode::Replace,
         },
         "skills" => CategoryMapping {
             codex: "skills".to_string(),
             gemini: "skills".to_string(),
             claude: "skills".to_string(),
+            sync_mode: SyncMode::Replace,
         },
         "plugins" => CategoryMapping {
             codex: "plugins".to_string(),
             gemini: "plugins".to_string(),
             claude: "plugins".to_string(),
+            sync_mode: SyncMode::Replace,
         },
         "commands" => CategoryMapping {
             codex: "rules".to_string(),
             gemini: "commands".to_string(),
             claude: "commands".to_string(),
+            sync_mode: SyncMode::Replace,
         },
         "mcp" => CategoryMapping {
             codex: "mcp.json".to_string(),
             gemini: "antigravity/mcp_config.json".to_string(),
             claude: "mcp.json".to_string(),
+            sync_mode: SyncMode::Replace,
         },
         _ => CategoryMapping {
             codex: category.to_string(),
             gemini: category.to_string(),
             claude: category.to_string(),
+            sync_mode: SyncMode::Replace,
         },
     }
 }
@@ -280,14 +245,18 @@ fn normalize_mapping(mut mapping: MappingConfig) -> (MappingConfig, bool) {
 
     if let Some(commands) = mapping.categories.get_mut("commands") {
         if commands.codex == "commands" && commands.gemini == "commands" && commands.claude == "commands" {
+            let saved_mode = commands.sync_mode.clone();
             *commands = default_category_mapping("commands");
+            commands.sync_mode = saved_mode;
             changed = true;
         }
     }
 
     if let Some(mcp) = mapping.categories.get_mut("mcp") {
         if mcp.codex == "mcp" && mcp.gemini == "mcp" && mcp.claude == "mcp" {
+            let saved_mode = mcp.sync_mode.clone();
             *mcp = default_category_mapping("mcp");
+            mcp.sync_mode = saved_mode;
             changed = true;
         }
     }
@@ -394,11 +363,9 @@ fn ensure_workspace_layout() -> Result<(), String> {
     let app = app_root()?;
     let source = source_root()?;
     let backups = backups_root()?;
-    let exports = exports_root()?;
     fs::create_dir_all(&app).map_err(|e| e.to_string())?;
     fs::create_dir_all(&source).map_err(|e| e.to_string())?;
     fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&exports).map_err(|e| e.to_string())?;
 
     let legacy_prompts = source.join(LEGACY_PROMPTS_CATEGORY);
     let instructions = source.join("instructions");
@@ -504,6 +471,103 @@ fn read_text(path: &Path) -> Result<String, String> {
     }
 }
 
+const AGENT_NAMES: [&str; 3] = ["codex", "gemini", "claude"];
+
+/// Check if source files use per-agent naming convention:
+/// files named base.*, codex.*, gemini.*, claude.*
+fn is_per_agent_source(source_files: &[String]) -> bool {
+    source_files.iter().any(|f| {
+        let stem = Path::new(f)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        stem == "base" || AGENT_NAMES.contains(&stem)
+    })
+}
+
+/// Compose content for a single agent in per-agent mode.
+/// Returns (composed_content, source_description).
+fn compose_per_agent_content(
+    category: &str,
+    category_root: &Path,
+    agent: &str,
+    source_files: &[String],
+) -> Result<Option<(String, String)>, String> {
+    let base_file = source_files.iter().find(|f| {
+        Path::new(f).file_stem().and_then(|s| s.to_str()) == Some("base")
+    });
+    let agent_file = source_files.iter().find(|f| {
+        Path::new(f).file_stem().and_then(|s| s.to_str()) == Some(agent)
+    });
+
+    let base_content = match base_file {
+        Some(f) => read_text(&category_root.join(f))?,
+        None => String::new(),
+    };
+    let agent_content = match agent_file {
+        Some(f) => read_text(&category_root.join(f))?,
+        None => String::new(),
+    };
+
+    let base_empty = base_content.trim().is_empty();
+    let agent_empty = agent_content.trim().is_empty();
+
+    if base_empty && agent_empty {
+        return Ok(None);
+    }
+
+    let composed = if base_empty {
+        agent_content
+    } else if agent_empty {
+        base_content
+    } else {
+        format!("{}\n\n{}", base_content.trim_end(), agent_content)
+    };
+
+    let desc = match (base_file, agent_file) {
+        (Some(b), Some(a)) => format!("{category}/{b} + {category}/{a}"),
+        (Some(b), None) => format!("{category}/{b}"),
+        (None, Some(a)) => format!("{category}/{a}"),
+        (None, None) => unreachable!(),
+    };
+
+    Ok(Some((composed, desc)))
+}
+
+/// Apply sync_mode (replace/append) to produce final content and status.
+fn apply_sync_mode(
+    before: &str,
+    after: String,
+    sync_mode: &SyncMode,
+    target_exists: bool,
+) -> (String, String) {
+    let after_content = match sync_mode {
+        SyncMode::Replace => after,
+        SyncMode::Append => {
+            if before.is_empty() {
+                after
+            } else if before.trim_end().ends_with(after.trim()) {
+                before.to_string()
+            } else {
+                format!("{}\n\n{}", before.trim_end(), after)
+            }
+        }
+    };
+
+    let status = if !target_exists {
+        "create"
+    } else if before == after_content {
+        "unchanged"
+    } else if matches!(sync_mode, SyncMode::Append) {
+        "append"
+    } else {
+        "update"
+    }
+    .to_string();
+
+    (after_content, status)
+}
+
 fn build_sync_items(mapping: &MappingConfig) -> Result<Vec<SyncItem>, String> {
     let src_root = source_root()?;
     let mut items = Vec::new();
@@ -516,64 +580,112 @@ fn build_sync_items(mapping: &MappingConfig) -> Result<Vec<SyncItem>, String> {
         }
 
         let source_files = list_files_recursive(&category_root)?;
-        for relative_under_category in source_files {
-            let source_abs = category_root.join(&relative_under_category);
-            let after = read_text(&source_abs)?;
+        if source_files.is_empty() {
+            continue;
+        }
 
-            let source_file = format!("{category}/{relative_under_category}");
-            let targets = [
-                ("codex", target_mapping.codex.as_str()),
-                ("gemini", target_mapping.gemini.as_str()),
-                ("claude", target_mapping.claude.as_str()),
-            ];
+        let is_file_mapping = looks_like_file_mapping_path(&target_mapping.codex);
+        let per_agent = is_file_mapping && is_per_agent_source(&source_files);
 
-            for (agent, subdir) in targets {
-                let agent_root = resolve_agent_root(agent)?;
-                let target_rel = if subdir.is_empty() {
-                    PathBuf::from(&relative_under_category)
-                } else if looks_like_file_mapping_path(subdir) {
-                    PathBuf::from(subdir)
-                } else {
-                    Path::new(subdir).join(&relative_under_category)
+        let targets = [
+            ("codex", target_mapping.codex.as_str()),
+            ("gemini", target_mapping.gemini.as_str()),
+            ("claude", target_mapping.claude.as_str()),
+        ];
+
+        if per_agent {
+            // Per-agent mode: base.md + {agent}.md → agent target
+            for (agent, mapped_path) in &targets {
+                let composed = compose_per_agent_content(
+                    category, &category_root, agent, &source_files,
+                )?;
+                let (after, source_desc) = match composed {
+                    Some(v) => v,
+                    None => continue,
                 };
 
+                let agent_root = resolve_agent_root(agent)?;
+                let target_rel = PathBuf::from(mapped_path);
                 let target_rel_str = to_slash_path(&target_rel);
                 let target_key = format!("{agent}:{target_rel_str}");
-                if planned_targets.contains(&target_key) {
-                    return Err(format!(
-                        "Category '{category}' maps multiple source files to the same target: {target_rel_str}"
-                    ));
-                }
                 planned_targets.insert(target_key);
 
                 let target_abs = agent_root.join(&target_rel);
-                let before = if target_abs.exists() {
+                let target_exists = target_abs.exists();
+                let before = if target_exists {
                     read_text(&target_abs)?
                 } else {
                     String::new()
                 };
 
-                let status = if !target_abs.exists() {
-                    "create"
-                } else if before == after {
-                    "unchanged"
-                } else {
-                    "update"
-                }
-                .to_string();
+                let (after_content, status) = apply_sync_mode(
+                    &before, after, &target_mapping.sync_mode, target_exists,
+                );
 
                 let id = format!("{agent}:{category}:{target_rel_str}");
                 items.push(SyncItem {
                     id,
                     agent: agent.to_string(),
                     category: category.to_string(),
-                    source_file: source_file.clone(),
+                    source_file: source_desc,
                     target_relative_path: target_rel_str,
                     target_absolute_path: target_abs.display().to_string(),
                     status,
                     before,
-                    after: after.clone(),
+                    after: after_content,
                 });
+            }
+        } else {
+            // Standard mode: each source file → all agents
+            for relative_under_category in &source_files {
+                let source_abs = category_root.join(relative_under_category);
+                let after = read_text(&source_abs)?;
+                let source_file = format!("{category}/{relative_under_category}");
+
+                for (agent, subdir) in &targets {
+                    let agent_root = resolve_agent_root(agent)?;
+                    let target_rel = if subdir.is_empty() {
+                        PathBuf::from(relative_under_category)
+                    } else if looks_like_file_mapping_path(subdir) {
+                        PathBuf::from(subdir)
+                    } else {
+                        Path::new(subdir).join(relative_under_category)
+                    };
+
+                    let target_rel_str = to_slash_path(&target_rel);
+                    let target_key = format!("{agent}:{target_rel_str}");
+                    if planned_targets.contains(&target_key) {
+                        return Err(format!(
+                            "Category '{category}' maps multiple source files to the same target: {target_rel_str}"
+                        ));
+                    }
+                    planned_targets.insert(target_key);
+
+                    let target_abs = agent_root.join(&target_rel);
+                    let target_exists = target_abs.exists();
+                    let before = if target_exists {
+                        read_text(&target_abs)?
+                    } else {
+                        String::new()
+                    };
+
+                    let (after_content, status) = apply_sync_mode(
+                        &before, after.clone(), &target_mapping.sync_mode, target_exists,
+                    );
+
+                    let id = format!("{agent}:{category}:{target_rel_str}");
+                    items.push(SyncItem {
+                        id,
+                        agent: agent.to_string(),
+                        category: category.to_string(),
+                        source_file: source_file.clone(),
+                        target_relative_path: target_rel_str,
+                        target_absolute_path: target_abs.display().to_string(),
+                        status,
+                        before,
+                        after: after_content,
+                    });
+                }
             }
         }
     }
@@ -586,6 +698,51 @@ fn build_sync_items(mapping: &MappingConfig) -> Result<Vec<SyncItem>, String> {
     Ok(items)
 }
 
+/// When source directory is empty (first launch), bootstrap by reading
+/// the core prompt files from the three agent CLIs:
+///   ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md, ~/.gemini/GEMINI.md
+fn bootstrap_source_from_agents(mapping: &MappingConfig) -> Result<bool, String> {
+    let src_root = source_root()?;
+
+    let existing = list_files_recursive(&src_root)?;
+    if !existing.is_empty() {
+        return Ok(false);
+    }
+
+    let instructions = match mapping.categories.get("instructions") {
+        Some(m) => m,
+        None => return Ok(false),
+    };
+
+    let category_dir = src_root.join("instructions");
+    fs::create_dir_all(&category_dir).map_err(|e| e.to_string())?;
+
+    // Read each agent's prompt file into source/instructions/<agent>.md
+    let agents: [(&str, &str); 3] = [
+        ("claude", &instructions.claude),
+        ("codex", &instructions.codex),
+        ("gemini", &instructions.gemini),
+    ];
+
+    let mut bootstrapped = false;
+    for (agent, mapped_path) in &agents {
+        let agent_root = resolve_agent_root(agent)?;
+        let target_file = agent_root.join(mapped_path);
+        if !target_file.exists() {
+            continue;
+        }
+        let content = read_text(&target_file)?;
+        if content.trim().is_empty() {
+            continue;
+        }
+        let source_name = format!("{agent}.md");
+        write_atomic_bytes(&category_dir.join(&source_name), content.as_bytes())?;
+        bootstrapped = true;
+    }
+
+    Ok(bootstrapped)
+}
+
 fn load_backup_manifest(backup_id: &str) -> Result<(PathBuf, BackupManifest), String> {
     let backup_dir = backups_root()?.join(backup_id);
     let manifest_path = backup_dir.join("manifest.json");
@@ -594,101 +751,13 @@ fn load_backup_manifest(backup_id: &str) -> Result<(PathBuf, BackupManifest), St
     Ok((backup_dir, manifest))
 }
 
-fn is_sensitive_key_name(key: &str) -> bool {
-    let lowered = key.to_ascii_lowercase();
-    lowered.contains("api_key")
-        || lowered.contains("apikey")
-        || lowered.contains("token")
-        || lowered.contains("secret")
-        || lowered.contains("password")
-        || lowered.contains("private_key")
-}
-
-fn sanitize_content(content: &str) -> String {
-    let mut out = String::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        let maybe_delim = if trimmed.contains('=') {
-            Some('=')
-        } else if trimmed.contains(':') {
-            Some(':')
-        } else {
-            None
-        };
-
-        if let Some(delim) = maybe_delim {
-            let mut parts = line.splitn(2, delim);
-            let left = parts.next().unwrap_or_default();
-            let right = parts.next().unwrap_or_default();
-            if is_sensitive_key_name(left.trim()) {
-                out.push_str(left);
-                out.push(delim);
-                if !right.starts_with(' ') {
-                    out.push(' ');
-                }
-                out.push_str("***");
-                out.push('\n');
-                continue;
-            }
-        }
-
-        out.push_str(line);
-        out.push('\n');
-    }
-
-    if !content.ends_with('\n') && out.ends_with('\n') {
-        out.pop();
-    }
-
-    out
-}
-
-fn endpoint_for(agent: &str, kind: &str, relative_path: &str) -> Result<AgentEndpoint, String> {
-    let root = resolve_scope_base(agent)?;
-    let absolute = root.join(relative_path);
-    Ok(AgentEndpoint {
-        agent: agent.to_string(),
-        kind: kind.to_string(),
-        path: absolute.display().to_string(),
-        exists: absolute.exists(),
-    })
-}
-
-#[tauri::command]
-fn get_agent_endpoints() -> Result<Vec<AgentEndpoint>, String> {
-    ensure_workspace_layout()?;
-    let mut endpoints = Vec::new();
-
-    let known_paths = [
-        ("codex", "instructions", "AGENTS.md"),
-        ("codex", "settings", "config.toml"),
-        ("codex", "skills", "skills"),
-        ("codex", "commands", "rules"),
-        ("gemini", "instructions", "GEMINI.md"),
-        ("gemini", "settings", "settings.json"),
-        ("gemini", "skills", "skills"),
-        ("gemini", "skills", "antigravity/skills"),
-        ("gemini", "skills", "antigravity/global_skills"),
-        ("gemini", "mcp", "antigravity/mcp_config.json"),
-        ("claude", "instructions", "CLAUDE.md"),
-        ("claude", "settings", "settings.json"),
-        ("claude", "settings", "settings.local.json"),
-        ("claude", "skills", "skills"),
-        ("claude", "commands", "commands"),
-        ("claude", "plugins", "plugins"),
-    ];
-
-    for (agent, kind, relative_path) in known_paths {
-        endpoints.push(endpoint_for(agent, kind, relative_path)?);
-    }
-
-    Ok(endpoints)
-}
-
 #[tauri::command]
 fn init_workspace() -> Result<WorkspaceInfo, String> {
     ensure_workspace_layout()?;
+
+    // Bootstrap source from agents on first launch
+    let mapping = load_mapping()?;
+    bootstrap_source_from_agents(&mapping)?;
 
     let source = source_root()?;
     let mapping = mapping_path()?;
@@ -718,17 +787,6 @@ fn init_workspace() -> Result<WorkspaceInfo, String> {
         categories: CATEGORY_NAMES.iter().map(|v| v.to_string()).collect(),
         scopes,
     })
-}
-
-#[tauri::command]
-fn get_mapping() -> Result<MappingConfig, String> {
-    load_mapping()
-}
-
-#[tauri::command]
-fn save_mapping(mapping: MappingConfig) -> Result<(), String> {
-    ensure_workspace_layout()?;
-    save_mapping_inner(&mapping)
 }
 
 #[tauri::command]
@@ -771,20 +829,6 @@ fn save_scope_file(scope: String, relative_path: String, content: String) -> Res
     let normalized = normalize_relative_path(&relative_path)?;
     let target = base.join(&normalized);
     write_atomic_bytes(&target, content.as_bytes())
-}
-
-#[tauri::command]
-fn delete_scope_file(scope: String, relative_path: String) -> Result<(), String> {
-    ensure_workspace_layout()?;
-    let base = ensure_scope_dir(&scope)?;
-    let normalized = normalize_relative_path(&relative_path)?;
-    let target = base.join(&normalized);
-
-    if target.exists() {
-        fs::remove_file(&target).map_err(|e| e.to_string())?;
-    }
-
-    Ok(())
 }
 
 #[tauri::command]
@@ -932,246 +976,19 @@ fn restore_backup(backup_id: String) -> Result<RestoreResult, String> {
     })
 }
 
-#[tauri::command]
-fn export_share_package(sanitize: bool) -> Result<ExportResult, String> {
-    ensure_workspace_layout()?;
-
-    let export_file = exports_root()?.join(format!("share-{}.zip", now_millis()?));
-    let writer = fs::File::create(&export_file).map_err(|e| e.to_string())?;
-    let mut zip = ZipWriter::new(writer);
-    let options = FileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated)
-        .unix_permissions(0o644);
-
-    let mut written_files = Vec::new();
-
-    let source = source_root()?;
-    for entry in WalkDir::new(&source)
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().is_file())
-    {
-        let relative = entry
-            .path()
-            .strip_prefix(&source)
-            .map_err(|e| e.to_string())?;
-        let relative_str = to_slash_path(relative);
-        let zip_name = format!("source/{relative_str}");
-
-        let bytes = fs::read(entry.path()).map_err(|e| e.to_string())?;
-        let payload = if sanitize {
-            String::from_utf8(bytes)
-                .map(|v| sanitize_content(&v).into_bytes())
-                .unwrap_or_else(|v| v.into_bytes())
-        } else {
-            bytes
-        };
-
-        zip.start_file(zip_name, options.clone())
-            .map_err(|e| e.to_string())?;
-        zip.write_all(&payload).map_err(|e| e.to_string())?;
-        written_files.push(relative_str);
-    }
-
-    let mapping = fs::read(mapping_path()?).map_err(|e| e.to_string())?;
-    zip.start_file("mapping.json", options.clone())
-        .map_err(|e| e.to_string())?;
-    zip.write_all(&mapping).map_err(|e| e.to_string())?;
-
-    let manifest = ShareManifest {
-        version: 1,
-        created_at: now_millis()?,
-        sanitized: sanitize,
-        files: written_files.clone(),
-    };
-    let manifest_text = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-    zip.start_file("manifest.json", options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(manifest_text.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    zip.finish().map_err(|e| e.to_string())?;
-
-    Ok(ExportResult {
-        path: export_file.display().to_string(),
-        files: written_files.len(),
-        sanitized: sanitize,
-    })
-}
-
-#[tauri::command]
-fn preview_import_package(zip_path: String) -> Result<ImportPreview, String> {
-    ensure_workspace_layout()?;
-
-    let file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-
-    let source = source_root()?;
-    let mut files = Vec::new();
-    let mut has_mapping = false;
-
-    for idx in 0..archive.len() {
-        let entry = archive.by_index(idx).map_err(|e| e.to_string())?;
-        let name = entry.name().to_string();
-        if name.ends_with('/') {
-            continue;
-        }
-
-        if let Some(relative) = name.strip_prefix("source/") {
-            let normalized = normalize_relative_path(relative)?;
-            let target = source.join(&normalized);
-            let status = if target.exists() { "overwrite" } else { "create" };
-            files.push(ImportFilePreview {
-                relative_path: to_slash_path(&normalized),
-                status: status.to_string(),
-            });
-        } else if name == "mapping.json" {
-            has_mapping = true;
-        }
-    }
-
-    files.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
-
-    Ok(ImportPreview {
-        zip_path,
-        files,
-        has_mapping,
-    })
-}
-
-#[tauri::command]
-fn apply_import_package(zip_path: String, overwrite: bool) -> Result<ImportResult, String> {
-    ensure_workspace_layout()?;
-
-    let file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
-    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
-
-    let mut source_entries: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-    let mut mapping_entry: Option<Vec<u8>> = None;
-
-    for idx in 0..archive.len() {
-        let mut entry = archive.by_index(idx).map_err(|e| e.to_string())?;
-        let name = entry.name().to_string();
-        if name.ends_with('/') {
-            continue;
-        }
-
-        let mut bytes = Vec::new();
-        entry.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-
-        if let Some(relative) = name.strip_prefix("source/") {
-            let normalized = normalize_relative_path(relative)?;
-            source_entries.push((normalized, bytes));
-        } else if name == "mapping.json" {
-            mapping_entry = Some(bytes);
-        }
-    }
-
-    source_entries.sort_by(|a, b| to_slash_path(&a.0).cmp(&to_slash_path(&b.0)));
-
-    let source = source_root()?;
-    let mapping_file = mapping_path()?;
-
-    let backup_id = now_millis()?.to_string();
-    let backup_dir = backups_root()?.join(&backup_id);
-    fs::create_dir_all(&backup_dir).map_err(|e| e.to_string())?;
-
-    let mut entries = Vec::new();
-    let mut applied = 0usize;
-    let mut skipped = 0usize;
-
-    for (relative, payload) in source_entries {
-        let target = source.join(&relative);
-        if target.exists() && !overwrite {
-            skipped += 1;
-            continue;
-        }
-
-        let existed_before = target.exists();
-        if existed_before {
-            let backup_file = backup_dir.join("source").join(&relative);
-            let original = fs::read(&target).map_err(|e| e.to_string())?;
-            write_atomic_bytes(&backup_file, &original)?;
-        }
-
-        entries.push(BackupEntry {
-            agent: "source".to_string(),
-            target_relative_path: to_slash_path(&relative),
-            target_absolute_path: target.display().to_string(),
-            existed_before,
-        });
-
-        write_atomic_bytes(&target, &payload)?;
-        applied += 1;
-    }
-
-    if let Some(mapping_bytes) = mapping_entry {
-        if mapping_file.exists() {
-            let backup_file = backup_dir.join("workspace").join("mapping.json");
-            let original = fs::read(&mapping_file).map_err(|e| e.to_string())?;
-            write_atomic_bytes(&backup_file, &original)?;
-            entries.push(BackupEntry {
-                agent: "workspace".to_string(),
-                target_relative_path: "mapping.json".to_string(),
-                target_absolute_path: mapping_file.display().to_string(),
-                existed_before: true,
-            });
-        } else {
-            entries.push(BackupEntry {
-                agent: "workspace".to_string(),
-                target_relative_path: "mapping.json".to_string(),
-                target_absolute_path: mapping_file.display().to_string(),
-                existed_before: false,
-            });
-        }
-
-        write_atomic_bytes(&mapping_file, &mapping_bytes)?;
-        applied += 1;
-    }
-
-    let backup_ref = if entries.is_empty() {
-        fs::remove_dir_all(&backup_dir).ok();
-        None
-    } else {
-        let manifest = BackupManifest {
-            backup_id: backup_id.clone(),
-            created_at: now_millis()?,
-            trigger: "import".to_string(),
-            entries,
-        };
-
-        let payload = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
-        write_atomic_bytes(&backup_dir.join("manifest.json"), payload.as_bytes())?;
-        Some(backup_id)
-    };
-
-    Ok(ImportResult {
-        backup_id: backup_ref,
-        applied_count: applied,
-        skipped_count: skipped,
-    })
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             init_workspace,
-            get_agent_endpoints,
-            get_mapping,
-            save_mapping,
             list_scope_files,
             read_scope_file,
             save_scope_file,
-            delete_scope_file,
             preview_sync,
             apply_sync,
             list_backups,
             restore_backup,
-            export_share_package,
-            preview_import_package,
-            apply_import_package,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -41,12 +41,11 @@
 .code-editor-textarea {
   @apply flex-1 w-full border-0 p-4 font-mono text-sm leading-relaxed resize-none outline-none;
   background: oklch(0.98 0 0 / 0.7);
-  min-height: 600px;
+  min-height: 300px;
 }
 
-/* Mapping textarea */
-.mapping-textarea {
-  @apply w-full border-0 p-4 font-mono text-sm leading-relaxed resize-y outline-none;
-  background: oklch(0.98 0 0 / 0.5);
-  min-height: 180px;
+/* Diff viewer overrides */
+table.diff-viewer-table {
+  width: 100%;
+  font-size: 12px;
 }

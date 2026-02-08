@@ -13,13 +13,6 @@ export interface WorkspaceInfo {
   scopes: ScopeInfo[];
 }
 
-export interface AgentEndpoint {
-  agent: ScopeName;
-  kind: string;
-  path: string;
-  exists: boolean;
-}
-
 export interface ScopeFiles {
   scope: ScopeName;
   base_path: string;
@@ -37,6 +30,7 @@ export interface CategoryMapping {
   codex: string;
   gemini: string;
   claude: string;
+  sync_mode?: "replace" | "append";
 }
 
 export interface MappingConfig {
@@ -51,7 +45,7 @@ export interface SyncItem {
   source_file: string;
   target_relative_path: string;
   target_absolute_path: string;
-  status: "create" | "update" | "unchanged";
+  status: "create" | "update" | "unchanged" | "append";
   before: string;
   after: string;
 }
@@ -76,27 +70,4 @@ export interface BackupInfo {
 
 export interface RestoreResult {
   restored_count: number;
-}
-
-export interface ExportResult {
-  path: string;
-  files: number;
-  sanitized: boolean;
-}
-
-export interface ImportFilePreview {
-  relative_path: string;
-  status: "create" | "overwrite";
-}
-
-export interface ImportPreview {
-  zip_path: string;
-  files: ImportFilePreview[];
-  has_mapping: boolean;
-}
-
-export interface ImportResult {
-  backup_id: string | null;
-  applied_count: number;
-  skipped_count: number;
 }
