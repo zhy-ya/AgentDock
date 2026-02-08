@@ -10,6 +10,12 @@ use crate::paths::{backups_root, resolve_agent_root, source_root};
 use crate::types::{ApplySyncResult, BackupEntry, BackupManifest, SyncItem, SyncPreview};
 
 const AGENT_NAMES: [&str; 3] = ["codex", "gemini", "claude"];
+const SOURCE_PROMPT_FILES: [&str; 4] = [
+    "instructions/base.md",
+    "instructions/codex.md",
+    "instructions/gemini.md",
+    "instructions/claude.md",
+];
 
 fn is_per_agent_source(source_files: &[String]) -> bool {
     source_files.iter().any(|f| {
@@ -297,6 +303,7 @@ pub fn apply_sync_inner(selected_ids: Vec<String>) -> Result<ApplySyncResult, St
         write_atomic_bytes(&target_abs, item.after.as_bytes())?;
         applied_files.push(item.target_absolute_path.clone());
     }
+    snapshot_source_prompt_files(&backup_dir, &mut entries)?;
 
     let manifest = BackupManifest {
         backup_id: backup_id.clone(),
@@ -312,4 +319,35 @@ pub fn apply_sync_inner(selected_ids: Vec<String>) -> Result<ApplySyncResult, St
         applied_count: applied_files.len(),
         files: applied_files,
     })
+}
+
+fn snapshot_source_prompt_files(
+    backup_dir: &Path,
+    entries: &mut Vec<BackupEntry>,
+) -> Result<(), String> {
+    let src_root = source_root()?;
+    for relative in SOURCE_PROMPT_FILES {
+        if entries
+            .iter()
+            .any(|entry| entry.agent == "source" && entry.target_relative_path == relative)
+        {
+            continue;
+        }
+
+        let target_abs = src_root.join(relative);
+        let existed_before = target_abs.exists();
+        if existed_before {
+            let backup_file = backup_dir.join("source").join(Path::new(relative));
+            let original = fs::read(&target_abs).map_err(|e| e.to_string())?;
+            write_atomic_bytes(&backup_file, &original)?;
+        }
+
+        entries.push(BackupEntry {
+            agent: "source".to_string(),
+            target_relative_path: relative.to_string(),
+            target_absolute_path: target_abs.display().to_string(),
+            existed_before,
+        });
+    }
+    Ok(())
 }
