@@ -143,7 +143,21 @@ ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 shasum -a 256 "$ZIP_PATH" > "$SHA_PATH"
 
 echo "Committing release changes ..."
-git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+FILES_TO_COMMIT=(
+  "package.json"
+  "src-tauri/Cargo.toml"
+  "src-tauri/tauri.conf.json"
+)
+
+if [[ -f "pnpm-lock.yaml" ]]; then
+  FILES_TO_COMMIT+=("pnpm-lock.yaml")
+fi
+
+if [[ -f "src-tauri/Cargo.lock" ]]; then
+  FILES_TO_COMMIT+=("src-tauri/Cargo.lock")
+fi
+
+git add "${FILES_TO_COMMIT[@]}"
 git commit -m "release: $TAG"
 
 echo "Tagging and pushing ..."
