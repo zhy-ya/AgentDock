@@ -10,6 +10,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { applySync, previewSync } from "@/api";
+import type { RestoreResult } from "@/types";
 import {
   Badge,
   Button,
@@ -44,9 +45,14 @@ export function PromptSyncLayout() {
   const { editors, dirty, loadAll, updateContent, saveAll } =
     usePromptEditors(setStatusMessage, setErrorMessage);
 
-  const onRestored = useCallback(async () => {
-    await loadAll();
-  }, [loadAll]);
+  const onRestored = useCallback(
+    async (_backupId: string, _result: RestoreResult) => {
+      await loadAll();
+      setStatusMessage("恢复完成，编辑区已按备份覆盖");
+      setView("prompts");
+    },
+    [loadAll, setStatusMessage],
+  );
 
   const { backupItems, refreshBackups, restoreBackupAction, deleteBackupAction } =
     useBackups(setStatusMessage, setErrorMessage, { onRestored });
@@ -109,7 +115,11 @@ export function PromptSyncLayout() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden px-4 py-5 md:px-8 md:py-8">
+    <div className="relative min-h-screen overflow-hidden px-4 pb-5 pt-12 md:px-8 md:pb-8 md:pt-14">
+      <div
+        data-tauri-drag-region
+        className="absolute inset-x-0 top-0 z-40 h-10"
+      />
       <BackgroundOrbs />
 
       <motion.div
@@ -122,8 +132,8 @@ export function PromptSyncLayout() {
           <CardHeader className="flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <div className="rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 p-2 text-white shadow-[0_16px_30px_-18px_rgba(6,182,212,0.8)]">
-                  <FolderSync className="size-5" />
+                <div className="liquid-icon rounded-xl p-2 text-zinc-900">
+                  <FolderSync className="size-5 text-zinc-900" />
                 </div>
                 <div>
                   <CardTitle className="text-lg">AgentDock Prompt Sync</CardTitle>
@@ -226,8 +236,8 @@ function StatusToast({
       transition={{ duration: 0.2 }}
       className={`fixed right-4 top-4 z-50 flex max-w-lg items-center gap-2 rounded-xl border px-4 py-2.5 text-sm shadow-lg backdrop-blur-xl ${
         tone === "success"
-          ? "border-emerald-300/60 bg-emerald-50/85 text-emerald-700"
-          : "border-red-300/60 bg-red-50/88 text-red-700"
+          ? "border-black/10 bg-white/88 text-zinc-800"
+          : "border-black/12 bg-white/92 text-zinc-800"
       }`}
     >
       {children}
@@ -239,12 +249,12 @@ function BackgroundOrbs() {
   return (
     <>
       <motion.div
-        className="pointer-events-none absolute -left-16 top-6 h-64 w-64 rounded-full bg-cyan-300/28 blur-3xl"
+        className="pointer-events-none absolute -left-16 top-6 h-64 w-64 rounded-full bg-black/10 blur-3xl"
         animate={{ y: [0, -12, 0], x: [0, 6, 0] }}
         transition={{ repeat: Infinity, duration: 7, ease: "easeInOut" }}
       />
       <motion.div
-        className="pointer-events-none absolute right-0 top-24 h-80 w-80 rounded-full bg-emerald-300/24 blur-3xl"
+        className="pointer-events-none absolute right-0 top-24 h-80 w-80 rounded-full bg-black/8 blur-3xl"
         animate={{ y: [0, 16, 0], x: [0, -8, 0] }}
         transition={{ repeat: Infinity, duration: 9, ease: "easeInOut" }}
       />

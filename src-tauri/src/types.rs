@@ -81,8 +81,17 @@ pub struct BackupInfo {
 }
 
 #[derive(Debug, Serialize)]
+pub struct RestoredSourcePrompts {
+    pub base: String,
+    pub codex: String,
+    pub gemini: String,
+    pub claude: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct RestoreResult {
     pub restored_count: usize,
+    pub source_prompts: RestoredSourcePrompts,
 }
 
 #[derive(Debug, Serialize)]

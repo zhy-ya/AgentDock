@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "AgentDock",
@@ -17,7 +18,18 @@
         "height": 860,
         "resizable": true,
         "minWidth": 980,
-        "minHeight": 680
+        "minHeight": 680,
+        "theme": "Light",
+        "transparent": true,
+        "backgroundColor": "#00ffffff",
+        "windowEffects": {
+          "effects": [
+            "underWindowBackground"
+          ],
+          "state": "active"
+        },
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {

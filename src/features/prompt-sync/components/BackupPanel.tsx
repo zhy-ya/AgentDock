@@ -119,14 +119,14 @@ export function BackupPanel({
                 return (
                   <li
                     key={item.backup_id}
-                    className="rounded-xl border border-white/50 bg-white/45 p-3 backdrop-blur-sm"
+                    className="rounded-xl border border-black/10 bg-white/58 p-3 backdrop-blur-sm"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-mono text-xs font-semibold text-slate-700">
+                        <p className="truncate font-mono text-xs font-semibold text-zinc-800">
                           {item.backup_id}
                         </p>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <p className="mt-1 text-xs text-zinc-500">
                           {formatUnixMs(item.created_at)} · {item.trigger} · {item.entry_count} 个文件
                         </p>
                       </div>
@@ -226,7 +226,7 @@ export function BackupPanel({
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-white/65 bg-white/35 py-16 text-slate-500">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-black/18 bg-white/52 py-16 text-zinc-500">
       <Archive className="size-10 opacity-50" strokeWidth={1.5} />
       <p className="text-sm font-medium">暂无备份</p>
       <p className="text-xs">执行一次同步后会自动创建备份快照。</p>
@@ -238,25 +238,25 @@ function BackupDetailView({ detail }: { detail: BackupDetail }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-white/45 bg-white/55">
+    <div className="mt-3 overflow-hidden rounded-lg border border-black/10 bg-white/60">
       {detail.entries.map((entry, idx) => {
         const isOpen = expandedIdx === idx;
         return (
-          <div key={`${entry.agent}-${entry.target_relative_path}`} className="border-b border-white/45 last:border-0">
+          <div key={`${entry.agent}-${entry.target_relative_path}`} className="border-b border-black/10 last:border-0">
             <button
               type="button"
-              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-white/60"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-black/4"
               onClick={() => setExpandedIdx(isOpen ? null : idx)}
             >
               <Badge variant={toAgentVariant(entry.agent)}>{entry.agent}</Badge>
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-600">
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-zinc-700">
                 {entry.target_relative_path}
               </span>
-              <span className="text-[11px] text-slate-500">
+              <span className="text-[11px] text-zinc-500">
                 {entry.existed_before ? "已备份" : "新建文件"}
               </span>
               <ChevronDown
-                className={`size-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                className={`size-4 text-zinc-500 transition-transform ${isOpen ? "rotate-180" : ""}`}
               />
             </button>
             <AnimatePresence initial={false}>
@@ -270,9 +270,9 @@ function BackupDetailView({ detail }: { detail: BackupDetail }) {
                 >
                   <div className="bg-white/75 px-3 pb-3">
                     {entry.backup_content == null ? (
-                      <p className="py-2 text-xs text-slate-500">该文件在同步前不存在</p>
+                      <p className="py-2 text-xs text-zinc-500">该文件在同步前不存在</p>
                     ) : (
-                      <pre className="max-h-64 overflow-auto rounded-lg border border-white/65 bg-white/90 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
+                      <pre className="max-h-64 overflow-auto rounded-lg border border-black/10 bg-white/88 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-zinc-800">
                         {entry.backup_content}
                       </pre>
                     )}

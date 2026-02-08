@@ -86,7 +86,7 @@ function EditorCard({
     >
       <Card
         className={cn(
-          "flex h-full flex-col overflow-hidden rounded-2xl border border-white/60",
+          "flex h-full flex-col overflow-hidden rounded-2xl border border-black/10",
           className,
         )}
       >
@@ -95,7 +95,7 @@ function EditorCard({
             <CardTitle className="text-sm">{label}</CardTitle>
             <div className="flex items-center gap-2">
               {editorKey !== "base" && <Badge variant={badgeVariant}>{editorKey}</Badge>}
-              {isDirty && <span className="size-2 rounded-full bg-amber-400 shadow-sm" />}
+              {isDirty && <span className="size-2 rounded-full bg-black/75 shadow-sm" />}
             </div>
           </div>
           <CardDescription>{sub}</CardDescription>

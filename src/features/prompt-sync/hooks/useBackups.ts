@@ -1,9 +1,9 @@
 import { useState, useCallback } from "react";
 import { listBackups, restoreBackup, deleteBackup } from "@/api";
-import type { BackupInfo } from "@/types";
+import type { BackupInfo, RestoreResult } from "@/types";
 
 interface UseBackupsOptions {
-  onRestored?: (backupId: string) => Promise<void> | void;
+  onRestored?: (backupId: string, result: RestoreResult) => Promise<void> | void;
 }
 
 export function useBackups(
@@ -32,7 +32,7 @@ export function useBackups(
         );
         await refreshBackups();
         if (onRestored) {
-          await onRestored(id);
+          await onRestored(id, r);
         }
       } catch (e) {
         setErrorMessage(String(e));

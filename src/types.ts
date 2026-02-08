@@ -68,8 +68,16 @@ export interface BackupInfo {
   entry_count: number;
 }
 
+export interface RestoredSourcePrompts {
+  base: string;
+  codex: string;
+  gemini: string;
+  claude: string;
+}
+
 export interface RestoreResult {
   restored_count: number;
+  source_prompts: RestoredSourcePrompts;
 }
 
 export interface BackupDetailEntry {
