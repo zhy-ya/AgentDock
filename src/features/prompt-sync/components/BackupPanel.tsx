@@ -1,9 +1,32 @@
 import { useState } from "react";
-import { RotateCcw, RefreshCw, Archive, Eye, ChevronDown, X, Trash2 } from "lucide-react";
-import type { BackupInfo, BackupDetail } from "@/types";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Archive,
+  ChevronDown,
+  Eye,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
+import type { BackupDetail, BackupInfo } from "@/types";
 import { getBackupDetail } from "@/api";
-import { formatUnixMs, AGENT_COLORS } from "../utils/constants";
-import { Btn } from "./ui";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui";
+import { formatUnixMs } from "../utils/constants";
+const MIN_REFRESH_FEEDBACK_MS = 550;
 
 export function BackupPanel({
   backupItems,
@@ -14,10 +37,11 @@ export function BackupPanel({
   backupItems: BackupInfo[];
   onRestore: (id: string) => void;
   onDelete: (id: string) => void;
-  onRefresh: () => void;
+  onRefresh: () => Promise<void> | void;
 }) {
   const [detail, setDetail] = useState<BackupDetail | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     type: "restore" | "delete";
     id: string;
@@ -30,10 +54,10 @@ export function BackupPanel({
     }
     setLoadingId(id);
     try {
-      const d = await getBackupDetail(id);
-      setDetail(d);
-    } catch (e) {
-      console.error(e);
+      const next = await getBackupDetail(id);
+      setDetail(next);
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoadingId(null);
     }
@@ -50,111 +74,162 @@ export function BackupPanel({
     onDelete(id);
   }
 
+  async function handleRefresh() {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    const startedAt = Date.now();
+    try {
+      await onRefresh();
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_REFRESH_FEEDBACK_MS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, MIN_REFRESH_FEEDBACK_MS - elapsed),
+        );
+      }
+      setIsRefreshing(false);
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold tracking-tight">备份历史</h2>
-        <Btn onClick={onRefresh}>
-          <RefreshCw size={14} /> 刷新
-        </Btn>
-      </div>
-
-      {backupItems.length === 0 ? (
-        <div className="glass rounded-2xl shadow-sm flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
-          <Archive size={40} strokeWidth={1} className="opacity-30" />
-          <p className="text-sm">暂无备份</p>
-          <p className="text-xs">同步操作会自动创建备份</p>
-        </div>
-      ) : (
-        <div className="glass rounded-2xl shadow-sm overflow-hidden">
-          <ul>
-            {backupItems.map((b) => {
-              const isExpanded = detail?.backup_id === b.backup_id;
-              return (
-                <li
-                  key={b.backup_id}
-                  className="border-b border-black/5 last:border-0"
-                >
-                  <div className="flex items-center justify-between px-5 py-3.5 gap-4">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-mono font-semibold truncate">
-                        {b.backup_id}
-                      </p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {formatUnixMs(b.created_at)} &middot; {b.trigger}{" "}
-                        &middot; {b.entry_count} 个文件
-                      </p>
-                    </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <Btn
-                        sm
-                        onClick={() => void onView(b.backup_id)}
-                        disabled={loadingId === b.backup_id}
-                      >
-                        {isExpanded ? (
-                          <X size={12} />
-                        ) : (
-                          <Eye size={12} />
-                        )}
-                        {loadingId === b.backup_id
-                          ? "加载中"
-                          : isExpanded
-                            ? "收起"
-                            : "查看"}
-                      </Btn>
-                      <Btn sm onClick={() => setConfirmState({ type: "restore", id: b.backup_id })}>
-                        <RotateCcw size={12} /> 恢复
-                      </Btn>
-                      <Btn
-                        sm
-                        danger
-                        onClick={() => setConfirmState({ type: "delete", id: b.backup_id })}
-                      >
-                        <Trash2 size={12} /> 删除
-                      </Btn>
-                    </div>
-                  </div>
-
-                  {isExpanded && detail && (
-                    <BackupDetailView detail={detail} />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-
-      {confirmState && (
-        <div
-          className="fixed inset-0 z-50 bg-black/30 p-4 flex items-center justify-center"
-          onClick={() => setConfirmState(null)}
-        >
-          <div
-            className="w-full max-w-md rounded-xl border border-black/10 bg-white shadow-xl p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="text-base font-semibold tracking-tight">
-              {confirmState.type === "restore" ? "确认恢复备份" : "确认删除备份"}
-            </h3>
-            <p className="text-sm text-gray-500 mt-2 break-all">
-              {confirmState.type === "restore"
-                ? `将恢复备份 ${confirmState.id} 的内容，是否继续？`
-                : `将删除备份 ${confirmState.id}，删除后无法恢复，是否继续？`}
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <Btn onClick={() => setConfirmState(null)}>取消</Btn>
-              <Btn
-                onClick={onConfirmAction}
-                primary={confirmState.type === "restore"}
-                danger={confirmState.type === "delete"}
-              >
-                {confirmState.type === "restore" ? "确认恢复" : "确认删除"}
-              </Btn>
-            </div>
+    <>
+      <Card className="glass-strong">
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <div className="space-y-1">
+            <CardTitle>备份历史</CardTitle>
+            <CardDescription>同步操作会自动生成快照，可回滚到任意历史版本。</CardDescription>
           </div>
-        </div>
-      )}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleRefresh()}
+            disabled={isRefreshing}
+          >
+            <RefreshMotionIcon active={isRefreshing} className="size-3.5" />
+            刷新
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-4">
+          {backupItems.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <ul className="space-y-2">
+              {backupItems.map((item) => {
+                const isExpanded = detail?.backup_id === item.backup_id;
+                return (
+                  <li
+                    key={item.backup_id}
+                    className="rounded-xl border border-white/50 bg-white/45 p-3 backdrop-blur-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-xs font-semibold text-slate-700">
+                          {item.backup_id}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatUnixMs(item.created_at)} · {item.trigger} · {item.entry_count} 个文件
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={loadingId === item.backup_id}
+                          onClick={() => void onView(item.backup_id)}
+                        >
+                          <Eye className="size-3.5" />
+                          {loadingId === item.backup_id
+                            ? "加载中"
+                            : isExpanded
+                              ? "收起"
+                              : "查看"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            setConfirmState({
+                              type: "restore",
+                              id: item.backup_id,
+                            })
+                          }
+                        >
+                          <RotateCcw className="size-3.5" />
+                          恢复
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() =>
+                            setConfirmState({
+                              type: "delete",
+                              id: item.backup_id,
+                            })
+                          }
+                        >
+                          <Trash2 className="size-3.5" />
+                          删除
+                        </Button>
+                      </div>
+                    </div>
+
+                    <AnimatePresence initial={false}>
+                      {isExpanded && detail && (
+                        <motion.div
+                          key={detail.backup_id}
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.2 }}
+                          className="overflow-hidden"
+                        >
+                          <BackupDetailView detail={detail} />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!confirmState} onOpenChange={(open) => !open && setConfirmState(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {confirmState?.type === "restore" ? "确认恢复备份" : "确认删除备份"}
+            </DialogTitle>
+            <DialogDescription>
+              {confirmState?.type === "restore"
+                ? `将恢复备份 ${confirmState.id} 的内容，是否继续？`
+                : `将删除备份 ${confirmState?.id}，删除后无法恢复，是否继续？`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setConfirmState(null)}>
+              取消
+            </Button>
+            <Button
+              variant={confirmState?.type === "delete" ? "danger" : "default"}
+              onClick={onConfirmAction}
+            >
+              {confirmState?.type === "restore" ? "确认恢复" : "确认删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-white/65 bg-white/35 py-16 text-slate-500">
+      <Archive className="size-10 opacity-50" strokeWidth={1.5} />
+      <p className="text-sm font-medium">暂无备份</p>
+      <p className="text-xs">执行一次同步后会自动创建备份快照。</p>
     </div>
   );
 }
@@ -163,57 +238,80 @@ function BackupDetailView({ detail }: { detail: BackupDetail }) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
 
   return (
-    <div className="border-t border-black/5 bg-gray-50/50">
+    <div className="mt-3 overflow-hidden rounded-lg border border-white/45 bg-white/55">
       {detail.entries.map((entry, idx) => {
-        const colors = AGENT_COLORS[entry.agent];
         const isOpen = expandedIdx === idx;
         return (
-          <div
-            key={`${entry.agent}-${entry.target_relative_path}`}
-            className="border-b border-black/5 last:border-0"
-          >
+          <div key={`${entry.agent}-${entry.target_relative_path}`} className="border-b border-white/45 last:border-0">
             <button
+              type="button"
+              className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors hover:bg-white/60"
               onClick={() => setExpandedIdx(isOpen ? null : idx)}
-              className="w-full flex items-center gap-3 px-5 py-2.5 text-left hover:bg-black/[0.02] transition-colors cursor-pointer"
             >
-              <span
-                className={`text-xs font-semibold uppercase px-1.5 py-0.5 rounded ${colors?.bg ?? "bg-gray-100"} ${colors?.text ?? "text-gray-600"}`}
-              >
-                {entry.agent}
-              </span>
-              <span className="text-xs text-gray-500 flex-1 truncate font-mono">
+              <Badge variant={toAgentVariant(entry.agent)}>{entry.agent}</Badge>
+              <span className="min-w-0 flex-1 truncate font-mono text-xs text-slate-600">
                 {entry.target_relative_path}
               </span>
-              <span className="text-[11px] text-gray-400">
+              <span className="text-[11px] text-slate-500">
                 {entry.existed_before ? "已备份" : "新建文件"}
               </span>
               <ChevronDown
-                size={14}
-                className={`text-gray-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
+                className={`size-4 text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}`}
               />
             </button>
-
-            {isOpen && (
-              <div className="px-5 pb-3">
-                {entry.backup_content != null ? (
-                  <div className="rounded-lg overflow-hidden border border-black/5">
-                    <div className="px-3 py-1.5 bg-gray-100 text-[11px] font-semibold text-gray-500">
-                      备份内容
-                    </div>
-                    <pre className="p-3 text-xs font-mono leading-relaxed whitespace-pre-wrap break-words max-h-[300px] overflow-auto bg-white">
-                      {entry.backup_content}
-                    </pre>
+            <AnimatePresence initial={false}>
+              {isOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <div className="bg-white/75 px-3 pb-3">
+                    {entry.backup_content == null ? (
+                      <p className="py-2 text-xs text-slate-500">该文件在同步前不存在</p>
+                    ) : (
+                      <pre className="max-h-64 overflow-auto rounded-lg border border-white/65 bg-white/90 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-700">
+                        {entry.backup_content}
+                      </pre>
+                    )}
                   </div>
-                ) : (
-                  <p className="text-xs text-gray-400 py-2">
-                    该文件在同步前不存在
-                  </p>
-                )}
-              </div>
-            )}
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         );
       })}
     </div>
+  );
+}
+
+function toAgentVariant(agent: string): "codex" | "gemini" | "claude" | "muted" {
+  if (agent === "codex" || agent === "gemini" || agent === "claude") {
+    return agent;
+  }
+  return "muted";
+}
+
+function RefreshMotionIcon({
+  active,
+  className,
+}: {
+  active: boolean;
+  className?: string;
+}) {
+  return (
+    <motion.span
+      className="inline-flex"
+      animate={active ? { rotate: 360 } : { rotate: 0 }}
+      transition={
+        active
+          ? { rotate: { duration: 1, repeat: Infinity, ease: "linear" } }
+          : { duration: 0.2 }
+      }
+    >
+      <RefreshCw className={className} />
+    </motion.span>
   );
 }

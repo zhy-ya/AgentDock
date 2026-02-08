@@ -1,32 +1,39 @@
-import { useCallback, useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
-  RefreshCw,
   CheckCircle2,
+  CloudUpload,
+  Database,
+  FolderSync,
+  RefreshCw,
+  Sparkles,
   XCircle,
-  Zap,
-  PenLine,
-  Archive,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { previewSync, applySync } from "@/api";
-import { fadeIn } from "../utils/constants";
-import { useWorkspace } from "../hooks/useWorkspace";
-import { usePromptEditors } from "../hooks/usePromptEditors";
+import { applySync, previewSync } from "@/api";
+import {
+  Badge,
+  Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui";
 import { useBackups } from "../hooks/useBackups";
-import { Btn } from "./ui";
-import { PromptEditors } from "./PromptEditors";
+import { usePromptEditors } from "../hooks/usePromptEditors";
+import { useWorkspace } from "../hooks/useWorkspace";
 import { BackupPanel } from "./BackupPanel";
+import { PromptEditors } from "./PromptEditors";
 
 type View = "prompts" | "backups";
-
-const NAV_ITEMS: { key: View; label: string; icon: typeof PenLine }[] = [
-  { key: "prompts", label: "Prompt 修改", icon: PenLine },
-  { key: "backups", label: "备份管理", icon: Archive },
-];
+const MIN_REFRESH_FEEDBACK_MS = 650;
 
 export function PromptSyncLayout() {
   const {
+    workspace,
     loading,
     statusMessage,
     setStatusMessage,
@@ -34,7 +41,6 @@ export function PromptSyncLayout() {
     setErrorMessage,
     boot,
   } = useWorkspace();
-
   const { editors, dirty, loadAll, updateContent, saveAll } =
     usePromptEditors(setStatusMessage, setErrorMessage);
 
@@ -46,6 +52,7 @@ export function PromptSyncLayout() {
     useBackups(setStatusMessage, setErrorMessage, { onRestored });
 
   const [view, setView] = useState<View>("prompts");
+  const [isReloading, setIsReloading] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -58,14 +65,13 @@ export function PromptSyncLayout() {
   }, []);
 
   async function onQuickSync() {
-    const ok = await saveAll();
-    if (!ok) return;
-
+    const saved = await saveAll();
+    if (!saved) return;
     try {
       const preview = await previewSync();
       const changedIds = preview.items
-        .filter((i) => i.status !== "unchanged")
-        .map((i) => i.id);
+        .filter((item) => item.status !== "unchanged")
+        .map((item) => item.id);
 
       if (changedIds.length === 0) {
         setStatusMessage("所有文件已是最新，无需同步");
@@ -77,121 +83,193 @@ export function PromptSyncLayout() {
         `同步完成，${result.applied_count} 个文件已更新${result.backup_id ? `（备份 ${result.backup_id}）` : ""}`,
       );
       await refreshBackups();
-    } catch (e) {
-      setErrorMessage(String(e));
+    } catch (error) {
+      setErrorMessage(String(error));
+    }
+  }
+
+  async function onReloadWorkspace() {
+    if (isReloading) return;
+    setIsReloading(true);
+    setStatusMessage("正在刷新工作区...");
+    const startedAt = Date.now();
+    try {
+      await boot();
+      await loadAll();
+      await refreshBackups();
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < MIN_REFRESH_FEEDBACK_MS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, MIN_REFRESH_FEEDBACK_MS - elapsed),
+        );
+      }
+      setIsReloading(false);
     }
   }
 
   return (
-    <div className="h-screen grid grid-cols-[200px_minmax(0,1fr)]">
-      {/* Sidebar */}
-      <aside className="h-screen flex flex-col glass border-r border-black/5">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 px-4 py-5 shrink-0">
-          <div className="w-8 h-8 bg-gradient-to-br from-accent to-green-500 rounded-lg flex items-center justify-center text-white font-extrabold text-xs shadow-[0_2px_8px_rgba(21,128,61,0.3)]">
-            AD
-          </div>
-          <div>
-            <p className="text-sm font-bold tracking-tight leading-tight">
-              AgentDock
-            </p>
-            <p className="text-[10px] text-gray-400">Manage AI CLI configs</p>
-          </div>
-        </div>
+    <div className="relative min-h-screen overflow-hidden px-4 py-5 md:px-8 md:py-8">
+      <BackgroundOrbs />
 
-        {/* Nav */}
-        <nav className="flex-1 px-2 flex flex-col gap-0.5">
-          {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
-            <button
-              key={key}
-              onClick={() => {
-                setView(key);
-                if (key === "backups") void refreshBackups();
-              }}
-              className={cn(
-                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer text-left w-full",
-                view === key
-                  ? "bg-accent-bg text-accent"
-                  : "text-gray-600 hover:bg-black/[0.03]",
-              )}
-            >
-              <Icon size={16} />
-              {label}
-            </button>
-          ))}
-        </nav>
-      </aside>
-
-      {/* Main */}
-      <main className="h-screen overflow-y-auto">
-        <div className="max-w-6xl mx-auto p-6 flex flex-col gap-5">
-          {/* Top bar */}
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-bold tracking-tight">
-                {view === "prompts" ? "Prompt 修改" : "备份管理"}
-              </h1>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {loading
-                  ? "加载中..."
-                  : view === "prompts"
-                    ? "编辑 prompt，一键同步到 Codex / Gemini / Claude"
-                    : "查看和恢复同步备份"}
-              </p>
-            </div>
-            {view === "prompts" && (
-              <div className="flex gap-2 shrink-0">
-                <Btn primary onClick={() => void onQuickSync()}>
-                  <Zap size={14} /> 一键同步
-                  {dirty && (
-                    <span className="ml-1 w-2 h-2 rounded-full bg-white/60 inline-block" />
-                  )}
-                </Btn>
-                <Btn
-                  onClick={() => {
-                    void boot();
-                    void loadAll();
-                  }}
-                >
-                  <RefreshCw size={14} />
-                </Btn>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="relative mx-auto flex w-full max-w-7xl flex-col gap-5"
+      >
+        <Card className="glass-strong overflow-hidden">
+          <CardHeader className="flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 p-2 text-white shadow-[0_16px_30px_-18px_rgba(6,182,212,0.8)]">
+                  <FolderSync className="size-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-lg">AgentDock Prompt Sync</CardTitle>
+                  <CardDescription>统一管理 Codex / Gemini / Claude 指令配置</CardDescription>
+                </div>
               </div>
-            )}
-          </div>
-
-          {/* Toast */}
-          <AnimatePresence>
-            {statusMessage && (
-              <motion.div
-                {...fadeIn}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm backdrop-blur-sm bg-green-50/70 border border-green-600/10 text-green-700"
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="muted">
+                  <Database className="mr-1 size-3.5" />
+                  备份 {backupItems.length}
+                </Badge>
+                {dirty && (
+                  <Badge>
+                    <Sparkles className="mr-1 size-3.5" />
+                    存在未保存修改
+                  </Badge>
+                )}
+                {workspace && (
+                  <Badge variant="muted" className="max-w-[min(60vw,30rem)] truncate">
+                    {workspace.app_root}
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => void onReloadWorkspace()}
+                disabled={loading || isReloading}
               >
-                <CheckCircle2 size={16} /> {statusMessage}
-              </motion.div>
-            )}
-            {errorMessage && (
-              <motion.div
-                {...fadeIn}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm backdrop-blur-sm bg-red-50/80 border border-red-600/10 text-red-600"
-              >
-                <XCircle size={16} /> {errorMessage}
-              </motion.div>
-            )}
-          </AnimatePresence>
+                <RefreshMotionIcon active={loading || isReloading} className="size-4" />
+                刷新
+              </Button>
+              <Button onClick={() => void onQuickSync()} disabled={loading || isReloading}>
+                <CloudUpload className="size-4" />
+                一键同步
+              </Button>
+            </div>
+          </CardHeader>
+        </Card>
 
-          {/* Content */}
-          {view === "prompts" ? (
+        <Tabs
+          value={view}
+          onValueChange={(next) => {
+            const selected = next as View;
+            setView(selected);
+            if (selected === "backups") {
+              void refreshBackups();
+            }
+          }}
+        >
+          <TabsList>
+            <TabsTrigger value="prompts">Prompt 修改</TabsTrigger>
+            <TabsTrigger value="backups">备份管理</TabsTrigger>
+          </TabsList>
+          <TabsContent value="prompts">
             <PromptEditors editors={editors} onContentChange={updateContent} />
-          ) : (
+          </TabsContent>
+          <TabsContent value="backups">
             <BackupPanel
               backupItems={backupItems}
               onRestore={(id) => void restoreBackupAction(id)}
               onDelete={(id) => void deleteBackupAction(id)}
-              onRefresh={() => void refreshBackups()}
+              onRefresh={() => refreshBackups()}
             />
-          )}
-        </div>
-      </main>
+          </TabsContent>
+        </Tabs>
+      </motion.div>
+
+      <AnimatePresence mode="popLayout">
+        {statusMessage && (
+          <StatusToast key={`ok-${statusMessage}`} tone="success">
+            <CheckCircle2 className="size-4" />
+            {statusMessage}
+          </StatusToast>
+        )}
+        {errorMessage && (
+          <StatusToast key={`error-${errorMessage}`} tone="error">
+            <XCircle className="size-4" />
+            {errorMessage}
+          </StatusToast>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+function StatusToast({
+  tone,
+  children,
+}: {
+  tone: "success" | "error";
+  children: ReactNode;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -8, scale: 0.96 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.96 }}
+      transition={{ duration: 0.2 }}
+      className={`fixed right-4 top-4 z-50 flex max-w-lg items-center gap-2 rounded-xl border px-4 py-2.5 text-sm shadow-lg backdrop-blur-xl ${
+        tone === "success"
+          ? "border-emerald-300/60 bg-emerald-50/85 text-emerald-700"
+          : "border-red-300/60 bg-red-50/88 text-red-700"
+      }`}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+function BackgroundOrbs() {
+  return (
+    <>
+      <motion.div
+        className="pointer-events-none absolute -left-16 top-6 h-64 w-64 rounded-full bg-cyan-300/28 blur-3xl"
+        animate={{ y: [0, -12, 0], x: [0, 6, 0] }}
+        transition={{ repeat: Infinity, duration: 7, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="pointer-events-none absolute right-0 top-24 h-80 w-80 rounded-full bg-emerald-300/24 blur-3xl"
+        animate={{ y: [0, 16, 0], x: [0, -8, 0] }}
+        transition={{ repeat: Infinity, duration: 9, ease: "easeInOut" }}
+      />
+    </>
+  );
+}
+
+function RefreshMotionIcon({
+  active,
+  className,
+}: {
+  active: boolean;
+  className?: string;
+}) {
+  return (
+    <motion.span
+      className="inline-flex"
+      animate={active ? { rotate: 360 } : { rotate: 0 }}
+      transition={
+        active
+          ? { rotate: { duration: 1, repeat: Infinity, ease: "linear" } }
+          : { duration: 0.2 }
+      }
+    >
+      <RefreshCw className={className} />
+    </motion.span>
   );
 }

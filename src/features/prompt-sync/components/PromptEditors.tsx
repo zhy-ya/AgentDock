@@ -1,9 +1,24 @@
+import { motion } from "framer-motion";
+import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Textarea } from "@/components/ui";
 import { cn } from "@/lib/utils";
-import { AGENT_COLORS } from "../utils/constants";
 import type { EditorKey, EditorState } from "../hooks/usePromptEditors";
 import { EDITOR_FILES } from "../hooks/usePromptEditors";
 
 const AGENT_KEYS: EditorKey[] = ["codex", "gemini", "claude"];
+const CARD_VARIANTS = {
+  hidden: { opacity: 0, y: 18 },
+  show: (index: number) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.25, delay: index * 0.04 },
+  }),
+};
+
+const AGENT_BADGE: Partial<Record<EditorKey, "codex" | "gemini" | "claude">> = {
+  codex: "codex",
+  gemini: "gemini",
+  claude: "claude",
+};
 
 export function PromptEditors({
   editors,
@@ -14,8 +29,7 @@ export function PromptEditors({
 }) {
   const base = EDITOR_FILES.find((e) => e.key === "base")!;
   return (
-    <div className="flex flex-col gap-4 flex-1 min-h-0">
-      {/* Base (shared) */}
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <EditorCard
         editorKey="base"
         label={base.label}
@@ -25,8 +39,7 @@ export function PromptEditors({
         className="min-h-[240px] max-h-[40vh]"
       />
 
-      {/* 3 agent editors */}
-      <div className="grid grid-cols-3 gap-4 flex-1 min-h-0">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-3">
         {AGENT_KEYS.map((key) => {
           const meta = EDITOR_FILES.find((e) => e.key === key)!;
           return (
@@ -37,7 +50,7 @@ export function PromptEditors({
               sub={meta.sub}
               state={editors[key]}
               onChange={(v) => onContentChange(key, v)}
-              className="min-h-[320px] max-h-[50vh]"
+              className="min-h-[300px] lg:max-h-[52vh]"
             />
           );
         })}
@@ -62,39 +75,44 @@ function EditorCard({
   className?: string;
 }) {
   const isDirty = state.content !== state.original;
-  const colors = editorKey !== "base" ? AGENT_COLORS[editorKey] : undefined;
+  const badgeVariant = AGENT_BADGE[editorKey] ?? "muted";
 
   return (
-    <div
-      className={cn(
-        "glass rounded-2xl shadow-sm flex flex-col overflow-hidden",
-        className,
-      )}
+    <motion.div
+      variants={CARD_VARIANTS}
+      initial="hidden"
+      animate="show"
+      custom={editorKey === "base" ? 0 : AGENT_KEYS.indexOf(editorKey) + 1}
     >
-      <div
+      <Card
         className={cn(
-          "flex items-center justify-between px-4 py-2.5 border-b border-black/5 shrink-0",
-          colors && colors.bg,
+          "flex h-full flex-col overflow-hidden rounded-2xl border border-white/60",
+          className,
         )}
       >
-        <div>
-          <span className={cn("text-sm font-semibold", colors?.text)}>
-            {label}
-            {isDirty && <span className="text-red-500 ml-1">*</span>}
-          </span>
-          <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>
-        </div>
-      </div>
-      <textarea
-        className="flex-1 w-full border-0 p-3 font-mono text-sm leading-relaxed resize-none outline-none bg-[oklch(0.98_0_0/0.7)]"
-        value={state.content}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={
-          editorKey === "base"
-            ? "输入所有 Agent 共享的 prompt（可选）..."
-            : `输入 ${label} 专属 prompt...`
-        }
-      />
-    </div>
+        <CardHeader className="gap-2">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm">{label}</CardTitle>
+            <div className="flex items-center gap-2">
+              {editorKey !== "base" && <Badge variant={badgeVariant}>{editorKey}</Badge>}
+              {isDirty && <span className="size-2 rounded-full bg-amber-400 shadow-sm" />}
+            </div>
+          </div>
+          <CardDescription>{sub}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-1 px-4 pb-4 pt-3">
+          <Textarea
+            className="min-h-full flex-1 resize-none"
+            value={state.content}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={
+              editorKey === "base"
+                ? "输入所有 Agent 共享的 prompt（可选）..."
+                : `输入 ${label} 专属 prompt...`
+            }
+          />
+        </CardContent>
+      </Card>
+    </motion.div>
   );
 }
