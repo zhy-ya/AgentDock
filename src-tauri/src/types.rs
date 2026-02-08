@@ -56,6 +56,13 @@ pub struct ApplySyncResult {
     pub files: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SourcePromptSnapshot {
+    pub relative_path: String,
+    pub existed_before: bool,
+    pub content: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BackupEntry {
     pub agent: String,

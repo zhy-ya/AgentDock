@@ -1,5 +1,6 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CheckCircle2,
   CloudUpload,
@@ -9,8 +10,8 @@ import {
   Sparkles,
   XCircle,
 } from "lucide-react";
-import { applySync, previewSync } from "@/api";
-import type { RestoreResult } from "@/types";
+import { applySync, previewSync, readScopeFile } from "@/api";
+import type { RestoreResult, SourcePromptSnapshot } from "@/types";
 import {
   Badge,
   Button,
@@ -24,7 +25,7 @@ import {
   TabsTrigger,
 } from "@/components/ui";
 import { useBackups } from "../hooks/useBackups";
-import { usePromptEditors } from "../hooks/usePromptEditors";
+import { EDITOR_FILES, usePromptEditors } from "../hooks/usePromptEditors";
 import { useWorkspace } from "../hooks/useWorkspace";
 import { BackupPanel } from "./BackupPanel";
 import { PromptEditors } from "./PromptEditors";
@@ -42,16 +43,16 @@ export function PromptSyncLayout() {
     setErrorMessage,
     boot,
   } = useWorkspace();
-  const { editors, dirty, loadAll, updateContent, saveAll } =
+  const { editors, dirty, loadAll, applyRestoredPrompts, updateContent, saveAll } =
     usePromptEditors(setStatusMessage, setErrorMessage);
 
   const onRestored = useCallback(
-    async (_backupId: string, _result: RestoreResult) => {
-      await loadAll();
+    (_backupId: string, result: RestoreResult) => {
+      applyRestoredPrompts(result.source_prompts);
       setStatusMessage("恢复完成，编辑区已按备份覆盖");
       setView("prompts");
     },
-    [loadAll, setStatusMessage],
+    [applyRestoredPrompts, setStatusMessage],
   );
 
   const { backupItems, refreshBackups, restoreBackupAction, deleteBackupAction } =
@@ -70,7 +71,30 @@ export function PromptSyncLayout() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const captureSourcePromptSnapshots = useCallback(async () => {
+    const snapshots = await Promise.all(
+      EDITOR_FILES.map(async ({ path }) => {
+        try {
+          const file = await readScopeFile("source", path);
+          return {
+            relative_path: path,
+            existed_before: true,
+            content: file.content,
+          } satisfies SourcePromptSnapshot;
+        } catch {
+          return {
+            relative_path: path,
+            existed_before: false,
+            content: "",
+          } satisfies SourcePromptSnapshot;
+        }
+      }),
+    );
+    return snapshots;
+  }, []);
+
   async function onQuickSync() {
+    const sourcePromptSnapshots = await captureSourcePromptSnapshots();
     const saved = await saveAll();
     if (!saved) return;
     try {
@@ -84,7 +108,7 @@ export function PromptSyncLayout() {
         return;
       }
 
-      const result = await applySync(changedIds);
+      const result = await applySync(changedIds, sourcePromptSnapshots);
       setStatusMessage(
         `同步完成，${result.applied_count} 个文件已更新${result.backup_id ? `（备份 ${result.backup_id}）` : ""}`,
       );
@@ -114,11 +138,22 @@ export function PromptSyncLayout() {
     }
   }
 
+  const onDragRegionMouseDown = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      void getCurrentWindow().startDragging().catch(() => {
+        // In non-tauri web preview this call is unsupported.
+      });
+    },
+    [],
+  );
+
   return (
     <div className="relative min-h-screen overflow-hidden px-4 pb-5 pt-12 md:px-8 md:pb-8 md:pt-14">
       <div
         data-tauri-drag-region
-        className="absolute inset-x-0 top-0 z-40 h-10"
+        onMouseDown={onDragRegionMouseDown}
+        className="fixed inset-x-0 top-0 z-40 h-11 cursor-grab active:cursor-grabbing"
       />
       <BackgroundOrbs />
 

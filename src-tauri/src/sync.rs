@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,7 +7,9 @@ use crate::files::{
 };
 use crate::mapping::{looks_like_file_mapping_path, MappingConfig, SyncMode};
 use crate::paths::{backups_root, resolve_agent_root, source_root};
-use crate::types::{ApplySyncResult, BackupEntry, BackupManifest, SyncItem, SyncPreview};
+use crate::types::{
+    ApplySyncResult, BackupEntry, BackupManifest, SourcePromptSnapshot, SyncItem, SyncPreview,
+};
 
 const AGENT_NAMES: [&str; 3] = ["codex", "gemini", "claude"];
 const SOURCE_PROMPT_FILES: [&str; 4] = [
@@ -249,7 +251,10 @@ pub fn preview_sync_inner() -> Result<SyncPreview, String> {
     })
 }
 
-pub fn apply_sync_inner(selected_ids: Vec<String>) -> Result<ApplySyncResult, String> {
+pub fn apply_sync_inner(
+    selected_ids: Vec<String>,
+    source_prompt_snapshots: Option<Vec<SourcePromptSnapshot>>,
+) -> Result<ApplySyncResult, String> {
     use crate::workspace::ensure_workspace_layout;
     use crate::mapping::load_mapping;
 
@@ -303,7 +308,7 @@ pub fn apply_sync_inner(selected_ids: Vec<String>) -> Result<ApplySyncResult, St
         write_atomic_bytes(&target_abs, item.after.as_bytes())?;
         applied_files.push(item.target_absolute_path.clone());
     }
-    snapshot_source_prompt_files(&backup_dir, &mut entries)?;
+    snapshot_source_prompt_files(&backup_dir, &mut entries, source_prompt_snapshots)?;
 
     let manifest = BackupManifest {
         backup_id: backup_id.clone(),
@@ -324,8 +329,18 @@ pub fn apply_sync_inner(selected_ids: Vec<String>) -> Result<ApplySyncResult, St
 fn snapshot_source_prompt_files(
     backup_dir: &Path,
     entries: &mut Vec<BackupEntry>,
+    source_prompt_snapshots: Option<Vec<SourcePromptSnapshot>>,
 ) -> Result<(), String> {
     let src_root = source_root()?;
+    let mut snapshots_by_relative: HashMap<String, SourcePromptSnapshot> = HashMap::new();
+    if let Some(snapshots) = source_prompt_snapshots {
+        for snapshot in snapshots {
+            if SOURCE_PROMPT_FILES.contains(&snapshot.relative_path.as_str()) {
+                snapshots_by_relative.insert(snapshot.relative_path.clone(), snapshot);
+            }
+        }
+    }
+
     for relative in SOURCE_PROMPT_FILES {
         if entries
             .iter()
@@ -335,10 +350,24 @@ fn snapshot_source_prompt_files(
         }
 
         let target_abs = src_root.join(relative);
-        let existed_before = target_abs.exists();
-        if existed_before {
+        let snapshot = snapshots_by_relative.remove(relative);
+        let (existed_before, backup_bytes) = if let Some(snapshot) = snapshot {
+            if snapshot.existed_before {
+                (true, Some(snapshot.content.into_bytes()))
+            } else {
+                (false, None)
+            }
+        } else if target_abs.exists() {
+            (
+                true,
+                Some(fs::read(&target_abs).map_err(|e| e.to_string())?),
+            )
+        } else {
+            (false, None)
+        };
+
+        if let Some(original) = backup_bytes {
             let backup_file = backup_dir.join("source").join(Path::new(relative));
-            let original = fs::read(&target_abs).map_err(|e| e.to_string())?;
             write_atomic_bytes(&backup_file, &original)?;
         }
 

@@ -7,6 +7,7 @@ import type {
   RestoreResult,
   ScopeFiles,
   ScopeName,
+  SourcePromptSnapshot,
   SyncPreview,
   WorkspaceInfo,
 } from "./types";
@@ -38,8 +39,11 @@ export function previewSync() {
   return invoke<SyncPreview>("preview_sync");
 }
 
-export function applySync(selectedIds: string[]) {
-  return invoke<ApplySyncResult>("apply_sync", { selectedIds });
+export function applySync(
+  selectedIds: string[],
+  sourcePromptSnapshots?: SourcePromptSnapshot[],
+) {
+  return invoke<ApplySyncResult>("apply_sync", { selectedIds, sourcePromptSnapshots });
 }
 
 export function listBackups() {

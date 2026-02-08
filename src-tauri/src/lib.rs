@@ -60,8 +60,11 @@ fn preview_sync() -> Result<SyncPreview, String> {
 }
 
 #[tauri::command]
-fn apply_sync(selected_ids: Vec<String>) -> Result<ApplySyncResult, String> {
-    sync::apply_sync_inner(selected_ids)
+fn apply_sync(
+    selected_ids: Vec<String>,
+    source_prompt_snapshots: Option<Vec<SourcePromptSnapshot>>,
+) -> Result<ApplySyncResult, String> {
+    sync::apply_sync_inner(selected_ids, source_prompt_snapshots)
 }
 
 #[tauri::command]

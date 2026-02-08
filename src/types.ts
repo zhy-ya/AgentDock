@@ -61,6 +61,12 @@ export interface ApplySyncResult {
   files: string[];
 }
 
+export interface SourcePromptSnapshot {
+  relative_path: string;
+  existed_before: boolean;
+  content: string;
+}
+
 export interface BackupInfo {
   backup_id: string;
   created_at: number;

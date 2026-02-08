@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { readScopeFile, saveScopeFile } from "@/api";
+import type { RestoredSourcePrompts } from "@/types";
 
 const SCOPE = "source" as const;
 
@@ -45,6 +46,15 @@ export function usePromptEditors(
       }
     }
     setEditors(next as Record<EditorKey, EditorState>);
+  }, []);
+
+  const applyRestoredPrompts = useCallback((prompts: RestoredSourcePrompts) => {
+    setEditors({
+      base: { content: prompts.base, original: prompts.base },
+      codex: { content: prompts.codex, original: prompts.codex },
+      gemini: { content: prompts.gemini, original: prompts.gemini },
+      claude: { content: prompts.claude, original: prompts.claude },
+    });
   }, []);
 
   const updateContent = useCallback((key: EditorKey, value: string) => {
@@ -99,5 +109,5 @@ export function usePromptEditors(
     return () => window.removeEventListener("keydown", h);
   }, [saveAll]);
 
-  return { editors, dirty, loadAll, updateContent, saveAll };
+  return { editors, dirty, loadAll, applyRestoredPrompts, updateContent, saveAll };
 }
