@@ -1,12 +1,12 @@
 [package]
-name = "tauri-app"
+name = "agentdock"
 version = "0.1.0"
-description = "AI Config Manager"
+description = "AgentDock"
 authors = ["Zane"]
 edition = "2021"
 
 [lib]
-name = "tauri_app_lib"
+name = "agentdock_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

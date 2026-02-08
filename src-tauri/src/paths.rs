@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-pub const APP_DIR_NAME: &str = ".ai-config-manager";
+pub const APP_DIR_NAME: &str = ".agentdock";
 pub const SOURCE_DIR_NAME: &str = "source";
 pub const BACKUPS_DIR_NAME: &str = "backups";
 pub const MAPPING_FILE_NAME: &str = "mapping.json";

@@ -1,85 +1,102 @@
-# AI Config Manager (Tauri)
+# AgentDock
 
-本项目是一个本地优先的配置编排工具，用于统一管理：
+**A local-first desktop workspace for AI CLI configuration sync**.
 
-- `~/.codex`
-- `~/.gemini`
-- `~/.claude`
+AgentDock helps you edit shared instructions once, then sync them to:
 
-核心理念：一次编辑公共配置，按映射同步到三端，支持共享导入导出和备份恢复。
+- `~/.codex/AGENTS.md`
+- `~/.gemini/GEMINI.md`
+- `~/.claude/CLAUDE.md`
 
-## 功能
+[中文文档](./README_CN.md)
 
-1. 公共配置编辑
-- 直接编辑 `source` 与三端目录文件
-- 支持搜索、新建、删除、保存
-- `Ctrl/Cmd + S` 快捷保存
-- 左侧导航栏 + 右侧预览/编辑仪表盘布局
+---
 
-2. 同步预览
-- 读取 `~/.ai-config-manager/source` 作为公共配置源
-- 按 `mapping.json` 映射生成同步计划
-- 显示 `create/update/unchanged` 差异项
-- 可勾选部分项执行同步
-- 默认术语采用 `instructions`（对应 `AGENTS.md/GEMINI.md/CLAUDE.md`）
+## Features
 
-3. 共享导入导出
-- 导出 source + mapping 为 zip 包
-- 支持去敏导出（`api_key/token/secret/password` 掩码）
-- 导入前可预览覆盖情况
+- **Unified prompt editing**: Edit one shared base prompt plus Codex/Gemini/Claude-specific prompts in a single UI.
+- **One-click sync**: Save and apply only changed files to target agent config paths.
+- **Automatic backup lifecycle**: Every sync creates backups you can inspect, restore, or delete.
+- **Workspace bootstrap**: On first launch, AgentDock can bootstrap source files from existing agent configs.
+- **Local-first by design**: Data stays on your machine.
 
-4. 备份恢复
-- 每次同步/导入自动生成备份
-- 可按备份 ID 回滚
+---
 
-## 目录约定
+## Prerequisites
 
-应用工作目录：`~/.ai-config-manager`
+| Requirement | Minimum |
+|---|---|
+| Node.js | 18+ |
+| pnpm | 9+ |
+| Rust toolchain | stable (`rustc`, `cargo`) |
+| Tauri prerequisites | Follow [official guide](https://tauri.app/start/prerequisites/) |
 
-- `source/` 公共配置源（默认包含 `instructions/skills/plugins/commands/mcp`）
-- `mapping.json` 映射规则
-- `backups/` 自动备份
-- `exports/` 导出的配置包
+---
 
-## 开发启动
-
-前置依赖：
-
-1. Node.js + pnpm
-2. Rust 工具链（`rustc`, `cargo`）
-3. Tauri 官方前置依赖（见 https://tauri.app/start/prerequisites/ ）
-
-安装与运行：
+## Quick Start
 
 ```bash
 pnpm install
 pnpm tauri dev
 ```
 
-仅前端调试：
+Frontend-only mode:
 
 ```bash
 pnpm dev
 ```
 
-## 关键命令（Rust）
+---
 
-- `init_workspace`
-- `get_agent_endpoints`
-- `list_scope_files`
-- `read_scope_file`
-- `save_scope_file`
-- `delete_scope_file`
-- `preview_sync`
-- `apply_sync`
-- `list_backups`
-- `restore_backup`
-- `export_share_package`
-- `preview_import_package`
-- `apply_import_package`
+## Project Structure
 
-## 注意事项
+```text
+agentdock/
+├── src/
+│   ├── api.ts
+│   ├── types.ts
+│   └── features/prompt-sync/
+│       ├── components/      # Sidebar, editors, backup panel
+│       ├── hooks/           # workspace/editor/backup hooks
+│       └── utils/
+├── src-tauri/
+│   ├── src/
+│   │   ├── lib.rs           # Tauri commands
+│   │   ├── mapping.rs       # category mapping and normalization
+│   │   ├── sync.rs          # sync planning and apply
+│   │   ├── backup.rs        # backup list/detail/restore/delete
+│   │   ├── workspace.rs     # workspace initialization/migration
+│   │   └── paths.rs         # app path resolution
+│   └── tauri.conf.json
+├── package.json
+└── README.md
+```
 
-1. 本地离线优先，不会主动上传你的配置内容。
-2. 当前版本是文本级同步，不做语义级合并。
-3. 若你本机未安装 Rust，`pnpm tauri dev` 无法运行。
+---
+
+## Workspace Layout
+
+Default workspace root:
+
+- `~/.agentdock`
+
+Main files:
+
+- `source/` shared source categories (`instructions`, `skills`, `plugins`, `commands`, `mcp`)
+- `mapping.json` sync mapping rules
+- `backups/` sync backups
+
+---
+
+## Development Commands
+
+```bash
+# frontend dev server
+pnpm dev
+
+# production frontend build
+pnpm build
+
+# tauri desktop app
+pnpm tauri dev
+```

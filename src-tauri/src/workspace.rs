@@ -2,8 +2,7 @@ use std::fs;
 
 use crate::files::list_files_recursive;
 use crate::mapping::{
-    default_mapping, load_mapping, save_mapping_inner, bootstrap_source_from_agents,
-    CATEGORY_NAMES, LEGACY_PROMPTS_CATEGORY,
+    bootstrap_source_from_agents, default_mapping, load_mapping, save_mapping_inner, CATEGORY_NAMES,
 };
 use crate::paths::{app_root, backups_root, mapping_path, resolve_scope_base, source_root};
 use crate::types::{ScopeInfo, WorkspaceInfo};
@@ -15,12 +14,6 @@ pub fn ensure_workspace_layout() -> Result<(), String> {
     fs::create_dir_all(&app).map_err(|e| e.to_string())?;
     fs::create_dir_all(&source).map_err(|e| e.to_string())?;
     fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
-
-    let legacy_prompts = source.join(LEGACY_PROMPTS_CATEGORY);
-    let instructions = source.join("instructions");
-    if legacy_prompts.exists() && !instructions.exists() {
-        fs::rename(&legacy_prompts, &instructions).map_err(|e| e.to_string())?;
-    }
 
     for category in CATEGORY_NAMES {
         fs::create_dir_all(source.join(category)).map_err(|e| e.to_string())?;

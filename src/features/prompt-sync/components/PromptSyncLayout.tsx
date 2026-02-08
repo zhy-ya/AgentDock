@@ -89,13 +89,13 @@ export function PromptSyncLayout() {
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-4 py-5 shrink-0">
           <div className="w-8 h-8 bg-gradient-to-br from-accent to-green-500 rounded-lg flex items-center justify-center text-white font-extrabold text-xs shadow-[0_2px_8px_rgba(21,128,61,0.3)]">
-            AI
+            AD
           </div>
           <div>
             <p className="text-sm font-bold tracking-tight leading-tight">
-              Prompt Sync
+              AgentDock
             </p>
-            <p className="text-[10px] text-gray-400">管理 AI CLI 配置</p>
+            <p className="text-[10px] text-gray-400">Manage AI CLI configs</p>
           </div>
         </div>
 

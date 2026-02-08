@@ -6,7 +6,6 @@ use crate::files::write_atomic_bytes;
 use crate::paths::{mapping_path, source_root};
 
 pub const CATEGORY_NAMES: [&str; 5] = ["instructions", "skills", "plugins", "commands", "mcp"];
-pub const LEGACY_PROMPTS_CATEGORY: &str = "prompts";
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "lowercase")]
@@ -86,39 +85,11 @@ pub fn default_category_mapping(category: &str) -> CategoryMapping {
 pub fn normalize_mapping(mut mapping: MappingConfig) -> (MappingConfig, bool) {
     let mut changed = false;
 
-    if !mapping.categories.contains_key("instructions") {
-        if let Some(legacy_prompts) = mapping.categories.remove(LEGACY_PROMPTS_CATEGORY) {
-            mapping
-                .categories
-                .insert("instructions".to_string(), legacy_prompts);
-            changed = true;
-        }
-    }
-
     for category in CATEGORY_NAMES {
         if !mapping.categories.contains_key(category) {
             mapping
                 .categories
                 .insert(category.to_string(), default_category_mapping(category));
-            changed = true;
-        }
-    }
-
-    if let Some(instructions) = mapping.categories.get_mut("instructions") {
-        let mut local_changed = false;
-        if instructions.codex == "prompts" {
-            instructions.codex = "AGENTS.md".to_string();
-            local_changed = true;
-        }
-        if instructions.gemini == "prompts" {
-            instructions.gemini = "GEMINI.md".to_string();
-            local_changed = true;
-        }
-        if instructions.claude == "prompts" {
-            instructions.claude = "CLAUDE.md".to_string();
-            local_changed = true;
-        }
-        if local_changed {
             changed = true;
         }
     }

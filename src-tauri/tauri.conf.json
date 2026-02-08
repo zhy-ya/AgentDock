@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "AI Config Manager",
+  "productName": "AgentDock",
   "version": "0.1.0",
-  "identifier": "com.yanzhenyu.aiconfigmanager",
+  "identifier": "com.yanzhenyu.agentdock",
   "build": {
     "beforeDevCommand": "pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "AI Config Manager",
+        "title": "AgentDock",
         "width": 1320,
         "height": 860,
         "resizable": true,
