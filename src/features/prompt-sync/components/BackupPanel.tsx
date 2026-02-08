@@ -18,6 +18,10 @@ export function BackupPanel({
 }) {
   const [detail, setDetail] = useState<BackupDetail | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    type: "restore" | "delete";
+    id: string;
+  } | null>(null);
 
   async function onView(id: string) {
     if (detail?.backup_id === id) {
@@ -33,6 +37,17 @@ export function BackupPanel({
     } finally {
       setLoadingId(null);
     }
+  }
+
+  function onConfirmAction() {
+    if (!confirmState) return;
+    const { type, id } = confirmState;
+    setConfirmState(null);
+    if (type === "restore") {
+      onRestore(id);
+      return;
+    }
+    onDelete(id);
   }
 
   return (
@@ -87,10 +102,14 @@ export function BackupPanel({
                             ? "收起"
                             : "查看"}
                       </Btn>
-                      <Btn sm onClick={() => onRestore(b.backup_id)}>
+                      <Btn sm onClick={() => setConfirmState({ type: "restore", id: b.backup_id })}>
                         <RotateCcw size={12} /> 恢复
                       </Btn>
-                      <Btn sm danger onClick={() => onDelete(b.backup_id)}>
+                      <Btn
+                        sm
+                        danger
+                        onClick={() => setConfirmState({ type: "delete", id: b.backup_id })}
+                      >
                         <Trash2 size={12} /> 删除
                       </Btn>
                     </div>
@@ -103,6 +122,37 @@ export function BackupPanel({
               );
             })}
           </ul>
+        </div>
+      )}
+
+      {confirmState && (
+        <div
+          className="fixed inset-0 z-50 bg-black/30 p-4 flex items-center justify-center"
+          onClick={() => setConfirmState(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-black/10 bg-white shadow-xl p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold tracking-tight">
+              {confirmState.type === "restore" ? "确认恢复备份" : "确认删除备份"}
+            </h3>
+            <p className="text-sm text-gray-500 mt-2 break-all">
+              {confirmState.type === "restore"
+                ? `将恢复备份 ${confirmState.id} 的内容，是否继续？`
+                : `将删除备份 ${confirmState.id}，删除后无法恢复，是否继续？`}
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <Btn onClick={() => setConfirmState(null)}>取消</Btn>
+              <Btn
+                onClick={onConfirmAction}
+                primary={confirmState.type === "restore"}
+                danger={confirmState.type === "delete"}
+              >
+                {confirmState.type === "restore" ? "确认恢复" : "确认删除"}
+              </Btn>
+            </div>
+          </div>
         </div>
       )}
     </div>

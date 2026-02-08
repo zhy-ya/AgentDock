@@ -19,7 +19,6 @@ export function useBackups(
 
   const restoreBackupAction = useCallback(
     async (id: string) => {
-      if (!window.confirm(`确认恢复备份 ${id}？`)) return;
       try {
         const r = await restoreBackup(id);
         setStatusMessage(`恢复完成，${r.restored_count} 个文件`);
@@ -33,7 +32,6 @@ export function useBackups(
 
   const deleteBackupAction = useCallback(
     async (id: string) => {
-      if (!window.confirm(`确认删除备份 ${id}？删除后无法恢复。`)) return;
       try {
         await deleteBackup(id);
         setStatusMessage("备份已删除");
