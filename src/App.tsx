@@ -1,4 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  LayoutDashboard,
+  FileCode2,
+  RefreshCw,
+  ArrowLeftRight,
+  Plus,
+  Trash2,
+  Save,
+  Download,
+  Upload,
+  Search,
+  FileText,
+  History,
+  RotateCcw,
+  Eye,
+  CheckCircle2,
+  XCircle,
+  Package,
+  Zap,
+} from "lucide-react";
 import {
   applyImportPackage,
   applySync,
@@ -17,7 +38,6 @@ import {
   saveScopeFile,
 } from "./api";
 import type {
-  AgentEndpoint,
   BackupInfo,
   ImportPreview,
   MappingConfig,
@@ -26,6 +46,7 @@ import type {
   SyncPreview,
   WorkspaceInfo,
 } from "./types";
+import { cn } from "@/lib/utils";
 import "./App.css";
 
 type ViewKey = "dashboard" | "editor" | "sync";
@@ -33,14 +54,35 @@ type ViewKey = "dashboard" | "editor" | "sync";
 const SCOPE_ITEMS: ScopeName[] = ["source", "codex", "gemini", "claude"];
 const AGENTS: ScopeName[] = ["codex", "gemini", "claude"];
 
+const AGENT_COLORS: Record<string, { bg: string; text: string }> = {
+  codex: { bg: "bg-codex-bg", text: "text-codex" },
+  gemini: { bg: "bg-gemini-bg", text: "text-gemini" },
+  claude: { bg: "bg-claude-bg", text: "text-claude" },
+};
+
+const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof LayoutDashboard }[] = [
+  { key: "dashboard", label: "总览", icon: LayoutDashboard },
+  { key: "editor", label: "编辑器", icon: FileCode2 },
+  { key: "sync", label: "同步", icon: ArrowLeftRight },
+];
+
+const VIEW_TITLES: Record<ViewKey, { title: string; sub: string }> = {
+  dashboard: { title: "总览", sub: "本地离线工作区" },
+  editor: { title: "配置编辑器", sub: "管理配置源与代理文件" },
+  sync: { title: "同步与工具", sub: "预览变更、映射、共享与备份" },
+};
+
 function formatUnixMs(ms: number) {
   return new Date(ms).toLocaleString();
 }
 
+const fadeIn = { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -8 }, transition: { duration: 0.2 } };
+const stagger = { animate: { transition: { staggerChildren: 0.04 } } };
+
 function App() {
   const [activeView, setActiveView] = useState<ViewKey>("dashboard");
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
-  const [endpoints, setEndpoints] = useState<AgentEndpoint[]>([]);
+  const [endpoints, setEndpoints] = useState<{ agent: ScopeName; kind: string; path: string; exists: boolean }[]>([]);
 
   const [statusMessage, setStatusMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -70,45 +112,37 @@ function App() {
   const [backupItems, setBackupItems] = useState<BackupInfo[]>([]);
 
   const visibleFiles = useMemo(() => {
-    const keyword = searchText.trim().toLowerCase();
-    if (!keyword) return files;
-    return files.filter((file) => file.toLowerCase().includes(keyword));
+    const kw = searchText.trim().toLowerCase();
+    if (!kw) return files;
+    return files.filter((f) => f.toLowerCase().includes(kw));
   }, [files, searchText]);
 
   const changedSyncItems = useMemo(() => {
     if (!syncPreviewData) return [];
-    return syncPreviewData.items.filter((item) => item.status !== "unchanged");
+    return syncPreviewData.items.filter((i) => i.status !== "unchanged");
   }, [syncPreviewData]);
 
   const focusedSyncItem = useMemo<SyncItem | null>(() => {
     if (!syncPreviewData || !focusedSyncId) return null;
-    return syncPreviewData.items.find((item) => item.id === focusedSyncId) ?? null;
+    return syncPreviewData.items.find((i) => i.id === focusedSyncId) ?? null;
   }, [syncPreviewData, focusedSyncId]);
 
-  const endpointSummary = useMemo(() => {
-    return AGENTS.map((agent) => {
-      const records = endpoints.filter((item) => item.agent === agent);
-      const existingCount = records.filter((item) => item.exists).length;
-      return { agent, total: records.length, existing: existingCount, records };
-    });
-  }, [endpoints]);
+  const totalEndpoints = endpoints.length;
+  const existingEndpoints = endpoints.filter((e) => e.exists).length;
+  const missingEndpoints = endpoints.filter((e) => !e.exists).length;
 
-  const totalEndpoints = useMemo(() => endpoints.length, [endpoints]);
-  const existingEndpoints = useMemo(() => endpoints.filter((e) => e.exists).length, [endpoints]);
-  const missingEndpoints = useMemo(() => endpoints.filter((e) => !e.exists).length, [endpoints]);
-
-  async function refreshScopeFiles(targetScope: ScopeName) {
+  async function refreshScopeFiles(s: ScopeName) {
     try {
-      const data = await listScopeFiles(targetScope);
-      setFiles(data.files);
-      setBasePath(data.base_path);
-      if (selectedFile && !data.files.includes(selectedFile)) {
+      const d = await listScopeFiles(s);
+      setFiles(d.files);
+      setBasePath(d.base_path);
+      if (selectedFile && !d.files.includes(selectedFile)) {
         setSelectedFile("");
         setFileContent("");
         setDirty(false);
       }
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
@@ -116,7 +150,7 @@ function App() {
     setLoading(true);
     setErrorMessage("");
     try {
-      const [ws, mapping, backups, endpointData] = await Promise.all([
+      const [ws, mapping, backups, ep] = await Promise.all([
         initWorkspace(),
         getMapping(),
         listBackups(),
@@ -125,29 +159,26 @@ function App() {
       setWorkspace(ws);
       setMappingText(`${JSON.stringify(mapping, null, 2)}\n`);
       setBackupItems(backups);
-      setEndpoints(endpointData);
+      setEndpoints(ep);
       setStatusMessage("工作区就绪");
       await refreshScopeFiles(scope);
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     } finally {
       setLoading(false);
     }
   }
 
-  async function openFile(targetFile: string) {
-    if (dirty) {
-      const allow = window.confirm("当前文件有未保存更改，是否放弃？");
-      if (!allow) return;
-    }
+  async function openFile(f: string) {
+    if (dirty && !window.confirm("当前文件有未保存更改，是否放弃？")) return;
     setErrorMessage("");
     try {
-      const data = await readScopeFile(scope, targetFile);
-      setSelectedFile(targetFile);
-      setFileContent(data.content);
+      const d = await readScopeFile(scope, f);
+      setSelectedFile(f);
+      setFileContent(d.content);
       setDirty(false);
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
@@ -158,35 +189,27 @@ function App() {
       setDirty(false);
       setStatusMessage(`已保存 ${scope}/${selectedFile}`);
       await refreshScopeFiles(scope);
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
   async function onCreateFile() {
-    const suggested =
-      scope === "source"
-        ? "instructions/global.md"
-        : scope === "codex"
-          ? "AGENTS.md"
-          : scope === "gemini"
-            ? "GEMINI.md"
-            : "CLAUDE.md";
-    const relativePath = window.prompt("输入新文件路径", suggested)?.trim();
-    if (!relativePath) return;
+    const suggested = scope === "source" ? "instructions/global.md" : scope === "codex" ? "AGENTS.md" : scope === "gemini" ? "GEMINI.md" : "CLAUDE.md";
+    const p = window.prompt("输入新文件路径", suggested)?.trim();
+    if (!p) return;
     try {
-      await saveScopeFile(scope, relativePath, "");
-      setStatusMessage(`已创建 ${scope}/${relativePath}`);
+      await saveScopeFile(scope, p, "");
+      setStatusMessage(`已创建 ${scope}/${p}`);
       await refreshScopeFiles(scope);
-      await openFile(relativePath);
-    } catch (error) {
-      setErrorMessage(String(error));
+      await openFile(p);
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
   async function onDeleteFile() {
-    if (!selectedFile) return;
-    if (!window.confirm(`确认删除 ${scope}/${selectedFile}？`)) return;
+    if (!selectedFile || !window.confirm(`确认删除 ${scope}/${selectedFile}？`)) return;
     try {
       await deleteScopeFile(scope, selectedFile);
       setStatusMessage(`已删除 ${scope}/${selectedFile}`);
@@ -194,8 +217,8 @@ function App() {
       setFileContent("");
       setDirty(false);
       await refreshScopeFiles(scope);
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
@@ -204,613 +227,530 @@ function App() {
       const parsed = JSON.parse(mappingText) as MappingConfig;
       await saveMapping(parsed);
       setStatusMessage("映射规则已保存");
-      const endpointData = await getAgentEndpoints();
-      setEndpoints(endpointData);
-    } catch (error) {
-      setErrorMessage(`映射保存失败: ${String(error)}`);
+      setEndpoints(await getAgentEndpoints());
+    } catch (e) {
+      setErrorMessage(`映射保存失败: ${String(e)}`);
     }
   }
 
   async function onPreviewSync() {
     try {
-      const data = await previewSync();
-      setSyncPreviewData(data);
-      const initialSelected = data.items
-        .filter((item) => item.status !== "unchanged")
-        .map((item) => item.id);
-      setSelectedSyncIds(initialSelected);
-      setFocusedSyncId(initialSelected[0] ?? "");
-      setStatusMessage(`预览完成，${data.items.length} 个端点`);
-    } catch (error) {
-      setErrorMessage(String(error));
+      const d = await previewSync();
+      setSyncPreviewData(d);
+      const ids = d.items.filter((i) => i.status !== "unchanged").map((i) => i.id);
+      setSelectedSyncIds(ids);
+      setFocusedSyncId(ids[0] ?? "");
+      setStatusMessage(`预览完成，共 ${d.items.length} 个端点`);
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
-  function toggleSyncItem(itemId: string) {
+  function toggleSyncItem(id: string) {
     setSelectedSyncIds((prev) =>
-      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId],
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
   }
 
   async function onApplySync() {
     try {
-      const result = await applySync(selectedSyncIds);
-      setStatusMessage(
-        `同步完成，${result.applied_count} 个文件${result.backup_id ? `（备份 ${result.backup_id}）` : ""}`,
-      );
+      const r = await applySync(selectedSyncIds);
+      setStatusMessage(`同步完成，${r.applied_count} 个文件${r.backup_id ? `（备份 ${r.backup_id}）` : ""}`);
       await onPreviewSync();
-      const [backups, endpointData] = await Promise.all([listBackups(), getAgentEndpoints()]);
-      setBackupItems(backups);
-      setEndpoints(endpointData);
+      const [b, ep] = await Promise.all([listBackups(), getAgentEndpoints()]);
+      setBackupItems(b);
+      setEndpoints(ep);
       await refreshScopeFiles(scope);
-    } catch (error) {
-      setErrorMessage(String(error));
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
   async function onExportShare() {
     try {
-      const result = await exportSharePackage(sanitizeExport);
-      setLastExportPath(result.path);
-      setStatusMessage(`导出完成: ${result.path}`);
-    } catch (error) {
-      setErrorMessage(String(error));
+      const r = await exportSharePackage(sanitizeExport);
+      setLastExportPath(r.path);
+      setStatusMessage(`导出完成: ${r.path}`);
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
   async function onPreviewImport() {
-    if (!importZipPath.trim()) {
-      setErrorMessage("请输入 zip 路径");
-      return;
-    }
+    if (!importZipPath.trim()) { setErrorMessage("请输入 zip 路径"); return; }
     try {
-      const result = await previewImportPackage(importZipPath.trim());
-      setImportPreviewData(result);
-      setStatusMessage(`预览完成，${result.files.length} 个文件`);
-    } catch (error) {
-      setErrorMessage(String(error));
+      const r = await previewImportPackage(importZipPath.trim());
+      setImportPreviewData(r);
+      setStatusMessage(`预览完成，${r.files.length} 个文件`);
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
   async function onApplyImport() {
-    if (!importZipPath.trim()) {
-      setErrorMessage("请输入 zip 路径");
-      return;
-    }
+    if (!importZipPath.trim()) { setErrorMessage("请输入 zip 路径"); return; }
     if (!window.confirm("确认执行导入？")) return;
     try {
-      const result = await applyImportPackage(importZipPath.trim(), overwriteImport);
-      setStatusMessage(
-        `导入完成，${result.applied_count} 个应用，${result.skipped_count} 个跳过`,
-      );
+      const r = await applyImportPackage(importZipPath.trim(), overwriteImport);
+      setStatusMessage(`导入完成，${r.applied_count} 个应用，${r.skipped_count} 个跳过`);
       await refreshScopeFiles(scope);
-      const backups = await listBackups();
-      setBackupItems(backups);
-    } catch (error) {
-      setErrorMessage(String(error));
+      setBackupItems(await listBackups());
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
-  async function onRestoreBackup(backupId: string) {
-    if (!window.confirm(`确认恢复备份 ${backupId}？`)) return;
+  async function onRestoreBackup(id: string) {
+    if (!window.confirm(`确认恢复备份 ${id}？`)) return;
     try {
-      const result = await restoreBackup(backupId);
-      setStatusMessage(`恢复完成，${result.restored_count} 个文件`);
+      const r = await restoreBackup(id);
+      setStatusMessage(`恢复完成，${r.restored_count} 个文件`);
       await refreshScopeFiles(scope);
-      const backups = await listBackups();
-      setBackupItems(backups);
-    } catch (error) {
-      setErrorMessage(String(error));
+      setBackupItems(await listBackups());
+    } catch (e) {
+      setErrorMessage(String(e));
     }
   }
 
+  useEffect(() => { void boot(); }, []);
+  useEffect(() => { void refreshScopeFiles(scope); }, [scope]);
   useEffect(() => {
-    void boot();
-  }, []);
-
-  useEffect(() => {
-    void refreshScopeFiles(scope);
-  }, [scope]);
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        void onSaveFile();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    const h = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); void onSaveFile(); } };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
   }, [scope, selectedFile, fileContent]);
 
+  /* ============ UI helpers ============ */
+
+  function GlassCard({ children, className }: { children: React.ReactNode; className?: string }) {
+    return (
+      <motion.div {...fadeIn} className={cn("glass rounded-2xl shadow-sm overflow-hidden", className)}>
+        {children}
+      </motion.div>
+    );
+  }
+
+  function CardHeader({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+    return (
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-black/5">
+        <h2 className="text-[15px] font-semibold tracking-tight">{children}</h2>
+        {action}
+      </div>
+    );
+  }
+
+  function Badge({ variant, children }: { variant: "green" | "yellow" | "gray"; children: React.ReactNode }) {
+    const cls = variant === "green" ? "bg-accent-light text-accent" : variant === "yellow" ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-400";
+    return <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold", cls)}>{children}</span>;
+  }
+
+  function Btn({
+    children, primary, danger, sm, className, ...rest
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean; danger?: boolean; sm?: boolean }) {
+    return (
+      <button
+        {...rest}
+        className={cn(
+          "inline-flex items-center gap-1.5 font-semibold rounded-lg cursor-pointer transition-all duration-150",
+          sm ? "px-3 py-1.5 text-xs" : "px-4 py-2 text-[13px]",
+          primary
+            ? "bg-gradient-to-br from-accent to-green-600 text-white border-0 shadow-[0_2px_6px_rgba(21,128,61,0.2)] hover:shadow-[0_3px_10px_rgba(21,128,61,0.3)]"
+            : danger
+              ? "bg-red-50 text-red-600 border border-red-200 hover:bg-red-100"
+              : "bg-white/70 backdrop-blur-sm text-gray-800 border border-black/10 hover:bg-gray-100",
+          className,
+        )}
+      >
+        {children}
+      </button>
+    );
+  }
+
+  /* ============ RENDER ============ */
+
   return (
-    <div className="app-layout">
-      {/* ===== Sidebar ===== */}
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon">AI</div>
-          <span className="brand-text">Config Manager</span>
-        </div>
-
-        <div className="nav-section">
-          <div className="nav-label">Menu</div>
-          <button
-            className={`nav-btn ${activeView === "dashboard" ? "active" : ""}`}
-            onClick={() => setActiveView("dashboard")}
-          >
-            <span className="nav-icon">&#9632;</span> Dashboard
-          </button>
-          <button
-            className={`nav-btn ${activeView === "editor" ? "active" : ""}`}
-            onClick={() => setActiveView("editor")}
-          >
-            <span className="nav-icon">&#9998;</span> Editor
-          </button>
-          <button
-            className={`nav-btn ${activeView === "sync" ? "active" : ""}`}
-            onClick={() => setActiveView("sync")}
-          >
-            <span className="nav-icon">&#8644;</span> Sync
-          </button>
-        </div>
-
-        <div className="sidebar-footer">
-          <div className="workspace-info">
-            {workspace ? workspace.app_root : "Loading..."}
+    <div className="min-h-screen grid grid-cols-[240px_minmax(0,1fr)]">
+      {/* ===== 侧边栏 ===== */}
+      <aside className="glass border-r border-white/30 flex flex-col gap-8 p-6">
+        <div className="flex items-center gap-3 px-2">
+          <div className="w-9 h-9 bg-gradient-to-br from-accent to-green-500 rounded-lg flex items-center justify-center text-white font-extrabold text-base shadow-[0_2px_8px_rgba(21,128,61,0.3)]">
+            AI
           </div>
+          <span className="text-base font-bold tracking-tight">配置管理器</span>
+        </div>
+
+        <nav className="flex flex-col gap-1">
+          <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest px-3 mb-1">导航</span>
+          {NAV_ITEMS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => setActiveView(key)}
+              className={cn(
+                "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left cursor-pointer border border-transparent",
+                activeView === key
+                  ? "bg-accent-bg border-accent/10 text-accent font-semibold"
+                  : "text-gray-500 hover:bg-black/[0.03] hover:text-gray-800",
+              )}
+            >
+              <Icon size={18} /> {label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="mt-auto pt-4 border-t border-black/5">
+          <p className="text-[11px] text-gray-400 break-all leading-relaxed">
+            {workspace ? workspace.app_root : "加载中..."}
+          </p>
         </div>
       </aside>
 
-      {/* ===== Main Area ===== */}
-      <main className="main-area">
-        {/* Top bar */}
-        <div className="top-bar">
+      {/* ===== 主区域 ===== */}
+      <main className="p-6 overflow-auto flex flex-col gap-5">
+        {/* 顶栏 */}
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h1>
-              {activeView === "dashboard"
-                ? "Dashboard"
-                : activeView === "editor"
-                  ? "Config Editor"
-                  : "Sync & Tools"}
-            </h1>
-            <p className="top-bar-subtitle">
-              {loading ? "Loading..." : "Local offline workspace"}
-            </p>
+            <h1 className="text-2xl font-bold tracking-tight">{VIEW_TITLES[activeView].title}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{loading ? "加载中..." : VIEW_TITLES[activeView].sub}</p>
           </div>
-          <div className="top-bar-actions">
-            <button className="btn" onClick={() => void boot()}>
-              Refresh
-            </button>
-            {activeView === "sync" && (
-              <button className="btn btn-primary" onClick={() => void onPreviewSync()}>
-                Generate Preview
-              </button>
-            )}
+          <div className="flex gap-2 shrink-0">
+            <Btn onClick={() => void boot()}><RefreshCw size={14} /> 刷新</Btn>
+            {activeView === "sync" && <Btn primary onClick={() => void onPreviewSync()}><Eye size={14} /> 生成预览</Btn>}
           </div>
         </div>
 
-        {/* Toast messages */}
-        {statusMessage && <div className="toast toast-ok">{statusMessage}</div>}
-        {errorMessage && <div className="toast toast-error">{errorMessage}</div>}
+        {/* Toast */}
+        <AnimatePresence>
+          {statusMessage && (
+            <motion.div {...fadeIn} className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm backdrop-blur-sm bg-green-50/70 border border-green-600/10 text-green-700">
+              <CheckCircle2 size={16} /> {statusMessage}
+            </motion.div>
+          )}
+          {errorMessage && (
+            <motion.div {...fadeIn} className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm backdrop-blur-sm bg-red-50/80 border border-red-600/10 text-red-600">
+              <XCircle size={16} /> {errorMessage}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* ===== Dashboard View ===== */}
-        {activeView === "dashboard" && (
-          <>
-            {/* Stats row */}
-            <div className="stats-row">
-              <div className="stat-card accent">
-                <p className="stat-label">Total Endpoints</p>
-                <p className="stat-value">{totalEndpoints}</p>
-                <p className="stat-sub">{AGENTS.length} agents configured</p>
-              </div>
-              <div className="stat-card">
-                <p className="stat-label">Active</p>
-                <p className="stat-value">{existingEndpoints}</p>
-                <p className="stat-sub">Files present</p>
-              </div>
-              <div className="stat-card">
-                <p className="stat-label">Missing</p>
-                <p className="stat-value">{missingEndpoints}</p>
-                <p className="stat-sub">Need sync</p>
-              </div>
-              <div className="stat-card">
-                <p className="stat-label">Backups</p>
-                <p className="stat-value">{backupItems.length}</p>
-                <p className="stat-sub">Available snapshots</p>
-              </div>
-            </div>
-
-            {/* Agent cards + Quick actions */}
-            <div className="content-grid">
-              {/* Agent endpoint detail */}
-              <div className="card">
-                <div className="card-header">
-                  <h2>Agent Endpoints</h2>
-                </div>
-                <div className="card-body">
-                  <ul className="endpoint-list">
-                    {endpointSummary.map((item) =>
-                      item.records.map((record) => (
-                        <li key={`${record.agent}:${record.path}`} className="endpoint-item">
-                          <div className={`endpoint-icon ${record.agent}`}>
-                            {record.agent[0].toUpperCase()}
-                          </div>
-                          <div className="endpoint-detail">
-                            <p className="endpoint-name">
-                              {record.agent} / {record.kind}
-                            </p>
-                            <p className="endpoint-path">{record.path}</p>
-                          </div>
-                          <span className={`tag tag-${record.exists ? "exists" : "missing"}`}>
-                            {record.exists ? "exists" : "missing"}
-                          </span>
-                        </li>
-                      )),
+        {/* ======= 总览 ======= */}
+        <AnimatePresence mode="wait">
+          {activeView === "dashboard" && (
+            <motion.div key="dashboard" {...fadeIn} className="flex flex-col gap-5">
+              {/* 统计卡片 */}
+              <motion.div className="grid grid-cols-4 gap-4" {...stagger}>
+                {([
+                  { label: "全部端点", value: totalEndpoints, sub: `已配置 ${AGENTS.length} 个代理`, accent: true },
+                  { label: "已就绪", value: existingEndpoints, sub: "文件已存在", accent: false },
+                  { label: "缺失", value: missingEndpoints, sub: "需要同步", accent: false },
+                  { label: "备份", value: backupItems.length, sub: "可用快照", accent: false },
+                ] as const).map((s, i) => (
+                  <motion.div
+                    key={i}
+                    {...fadeIn}
+                    whileHover={{ y: -2 }}
+                    className={cn(
+                      "glass rounded-2xl p-5 shadow-sm",
+                      s.accent && "!bg-gradient-to-br from-accent to-green-600 !border-transparent text-white shadow-[0_4px_16px_rgba(21,128,61,0.25)]",
                     )}
-                  </ul>
-                </div>
-              </div>
-
-              {/* Quick Actions + Recent Backups */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div className="card">
-                  <div className="card-header">
-                    <h2>Quick Actions</h2>
-                  </div>
-                  <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <button
-                      className="btn btn-primary"
-                      style={{ width: "100%", justifyContent: "center" }}
-                      onClick={() => {
-                        setActiveView("sync");
-                        void onPreviewSync();
-                      }}
-                    >
-                      Preview & Sync
-                    </button>
-                    <button
-                      className="btn"
-                      style={{ width: "100%", justifyContent: "center" }}
-                      onClick={() => setActiveView("editor")}
-                    >
-                      Edit Configs
-                    </button>
-                    <button
-                      className="btn"
-                      style={{ width: "100%", justifyContent: "center" }}
-                      onClick={() => void onExportShare()}
-                    >
-                      Export Share Package
-                    </button>
-                  </div>
-                </div>
-
-                <div className="card">
-                  <div className="card-header">
-                    <h2>Recent Backups</h2>
-                  </div>
-                  <div className="card-body">
-                    {backupItems.length === 0 ? (
-                      <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: 13 }}>
-                        No backups yet
-                      </p>
-                    ) : (
-                      <ul className="backup-list">
-                        {backupItems.slice(0, 3).map((item) => (
-                          <li key={item.backup_id} className="backup-item">
-                            <div className="backup-meta">
-                              <p className="backup-id">{item.backup_id}</p>
-                              <p className="backup-detail">
-                                {formatUnixMs(item.created_at)} &middot; {item.trigger} &middot;{" "}
-                                {item.entry_count} files
-                              </p>
-                            </div>
-                            <button
-                              className="btn btn-sm"
-                              onClick={() => void onRestoreBackup(item.backup_id)}
-                            >
-                              Restore
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* ===== Editor View ===== */}
-        {activeView === "editor" && (
-          <div className="editor-layout">
-            {/* File panel */}
-            <div className="file-panel">
-              <div className="file-panel-header">
-                <div className="scope-tabs">
-                  {SCOPE_ITEMS.map((item) => (
-                    <button
-                      key={item}
-                      className={`scope-tab ${scope === item ? "active" : ""}`}
-                      onClick={() => setScope(item)}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  className="search-input"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="Search files..."
-                />
-              </div>
-
-              <div className="file-list-area">
-                <ul className="file-list">
-                  {visibleFiles.map((file) => (
-                    <li key={file}>
-                      <button
-                        className={`file-item ${selectedFile === file ? "active" : ""}`}
-                        onClick={() => void openFile(file)}
-                      >
-                        {file}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="file-panel-footer">
-                <button className="btn btn-sm" onClick={() => void onCreateFile()}>
-                  + New
-                </button>
-                <button className="btn btn-sm btn-danger" onClick={() => void onDeleteFile()}>
-                  Delete
-                </button>
-              </div>
-            </div>
-
-            {/* Code panel */}
-            <div className="code-panel">
-              {selectedFile ? (
-                <>
-                  <div className="code-header">
-                    <p className="code-filename">
-                      {scope}/{selectedFile}
-                      {dirty && <span className="dirty">*</span>}
-                    </p>
-                    <button className="btn btn-primary btn-sm" onClick={() => void onSaveFile()}>
-                      Save
-                    </button>
-                  </div>
-                  <textarea
-                    className="code-editor"
-                    value={fileContent}
-                    onChange={(e) => {
-                      setFileContent(e.target.value);
-                      setDirty(true);
-                    }}
-                  />
-                </>
-              ) : (
-                <div className="empty-state">
-                  <div className="empty-state-icon">&#128196;</div>
-                  <p>Select a file to edit</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* ===== Sync View (Sync + Share + Backup merged) ===== */}
-        {activeView === "sync" && (
-          <>
-            {/* Sync layout */}
-            <div className="sync-layout">
-              {/* Sync list panel */}
-              <div className="sync-list-panel">
-                <div className="sync-toolbar">
-                  <h2>Changes</h2>
-                  <span className="tag tag-update">{changedSyncItems.length} pending</span>
-                </div>
-                <div className="sync-stats">
-                  <span>
-                    Changed: <strong>{changedSyncItems.length}</strong>
-                  </span>
-                  <span>
-                    Selected: <strong>{selectedSyncIds.length}</strong>
-                  </span>
-                </div>
-                <ul className="sync-items">
-                  {changedSyncItems.map((item) => (
-                    <li
-                      key={item.id}
-                      className={`sync-item ${focusedSyncId === item.id ? "active" : ""}`}
-                      onClick={() => setFocusedSyncId(item.id)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedSyncIds.includes(item.id)}
-                        onChange={() => toggleSyncItem(item.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{ accentColor: "var(--accent)" }}
-                      />
-                      <div className="sync-item-info">
-                        <div className="sync-item-agent">{item.agent}</div>
-                        <div className="sync-item-path">{item.target_relative_path}</div>
-                      </div>
-                      <span className={`tag tag-${item.status}`}>{item.status}</span>
-                    </li>
-                  ))}
-                  {changedSyncItems.length === 0 && (
-                    <li className="sync-item" style={{ justifyContent: "center", color: "var(--ink-muted)" }}>
-                      Click "Generate Preview" to scan
-                    </li>
-                  )}
-                </ul>
-                <div className="sync-footer">
-                  <button className="btn btn-primary" onClick={() => void onApplySync()}>
-                    Apply Selected
-                  </button>
-                </div>
-              </div>
-
-              {/* Diff panel */}
-              <div className="diff-panel">
-                {focusedSyncItem ? (
-                  <>
-                    <div className="diff-header">
-                      <h2>Diff</h2>
-                      <p className="diff-source">
-                        {focusedSyncItem.source_file} &rarr; {focusedSyncItem.agent}/
-                        {focusedSyncItem.target_relative_path}
-                      </p>
-                    </div>
-                    <div className="diff-body">
-                      <div className="diff-side">
-                        <div className="diff-side-label">Before</div>
-                        <pre>{focusedSyncItem.before}</pre>
-                      </div>
-                      <div className="diff-side">
-                        <div className="diff-side-label">After</div>
-                        <pre>{focusedSyncItem.after}</pre>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="empty-state">
-                    <div className="empty-state-icon">&#128269;</div>
-                    <p>Select an item to see diff</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Mapping editor */}
-            <div className="mapping-section">
-              <div className="mapping-header">
-                <h2>Mapping Rules</h2>
-                <button className="btn btn-sm" onClick={() => void onSaveMapping()}>
-                  Save Mapping
-                </button>
-              </div>
-              <textarea
-                className="mapping-editor"
-                value={mappingText}
-                onChange={(e) => setMappingText(e.target.value)}
-              />
-            </div>
-
-            {/* Share & Backup */}
-            <div className="secondary-cards">
-              {/* Export / Import */}
-              <div className="card">
-                <div className="card-header">
-                  <h2>Share</h2>
-                </div>
-                <div className="card-body">
-                  <div className="share-section">
-                    <div className="share-row">
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={sanitizeExport}
-                          onChange={(e) => setSanitizeExport(e.target.checked)}
-                        />
-                        Sanitize export
-                      </label>
-                      <button className="btn btn-sm btn-primary" onClick={() => void onExportShare()}>
-                        Export ZIP
-                      </button>
-                    </div>
-                    {lastExportPath && <p className="mono-text">{lastExportPath}</p>}
-
-                    <hr style={{ border: "none", borderTop: "1px solid var(--line)", margin: "8px 0" }} />
-
-                    <input
-                      className="text-input"
-                      value={importZipPath}
-                      onChange={(e) => setImportZipPath(e.target.value)}
-                      placeholder="/path/to/share.zip"
-                    />
-                    <div className="share-row">
-                      <label className="checkbox-label">
-                        <input
-                          type="checkbox"
-                          checked={overwriteImport}
-                          onChange={(e) => setOverwriteImport(e.target.checked)}
-                        />
-                        Overwrite
-                      </label>
-                      <button className="btn btn-sm" onClick={() => void onPreviewImport()}>
-                        Preview
-                      </button>
-                      <button className="btn btn-sm btn-primary" onClick={() => void onApplyImport()}>
-                        Import
-                      </button>
-                    </div>
-
-                    {importPreviewData && (
-                      <ul className="import-preview-list">
-                        {importPreviewData.files.map((item) => (
-                          <li key={item.relative_path}>
-                            <span className={`tag tag-${item.status}`}>{item.status}</span>
-                            <span>{item.relative_path}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Backups */}
-              <div className="card">
-                <div className="card-header">
-                  <h2>Backups</h2>
-                  <button
-                    className="btn btn-sm"
-                    onClick={async () => {
-                      const items = await listBackups();
-                      setBackupItems(items);
-                    }}
                   >
-                    Refresh
-                  </button>
-                </div>
-                <div className="card-body">
-                  {backupItems.length === 0 ? (
-                    <p style={{ margin: 0, color: "var(--ink-muted)", fontSize: 13 }}>
-                      No backups
-                    </p>
-                  ) : (
-                    <ul className="backup-list">
-                      {backupItems.map((item) => (
-                        <li key={item.backup_id} className="backup-item">
-                          <div className="backup-meta">
-                            <p className="backup-id">{item.backup_id}</p>
-                            <p className="backup-detail">
-                              {formatUnixMs(item.created_at)} &middot; {item.trigger} &middot;{" "}
-                              {item.entry_count} files
-                            </p>
+                    <p className={cn("text-sm font-medium mb-2", s.accent ? "text-white/80" : "text-gray-500")}>{s.label}</p>
+                    <p className="text-[32px] font-extrabold leading-none tracking-tight">{s.value}</p>
+                    <p className={cn("text-[11px] mt-2", s.accent ? "text-white/60" : "text-gray-400")}>{s.sub}</p>
+                  </motion.div>
+                ))}
+              </motion.div>
+
+              {/* 端点列表 + 快捷操作 */}
+              <div className="grid grid-cols-2 gap-4">
+                <GlassCard>
+                  <CardHeader>代理端点</CardHeader>
+                  <div className="p-5">
+                    <ul className="space-y-0">
+                      {endpoints.map((r) => (
+                        <li key={`${r.agent}:${r.path}`} className="flex items-center gap-3 py-2.5 border-b border-black/5 last:border-0">
+                          <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold uppercase", AGENT_COLORS[r.agent]?.bg, AGENT_COLORS[r.agent]?.text)}>
+                            {r.agent[0].toUpperCase()}
                           </div>
-                          <button
-                            className="btn btn-sm"
-                            onClick={() => void onRestoreBackup(item.backup_id)}
-                          >
-                            Restore
-                          </button>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold">{r.agent} / {r.kind}</p>
+                            <p className="text-[11px] text-gray-400 truncate">{r.path}</p>
+                          </div>
+                          <Badge variant={r.exists ? "green" : "gray"}>{r.exists ? "就绪" : "缺失"}</Badge>
                         </li>
                       ))}
                     </ul>
+                  </div>
+                </GlassCard>
+
+                <div className="flex flex-col gap-4">
+                  <GlassCard>
+                    <CardHeader>快捷操作</CardHeader>
+                    <div className="p-5 flex flex-col gap-2.5">
+                      <Btn primary className="w-full justify-center" onClick={() => { setActiveView("sync"); void onPreviewSync(); }}>
+                        <Zap size={14} /> 预览并同步
+                      </Btn>
+                      <Btn className="w-full justify-center" onClick={() => setActiveView("editor")}>
+                        <FileCode2 size={14} /> 编辑配置
+                      </Btn>
+                      <Btn className="w-full justify-center" onClick={() => void onExportShare()}>
+                        <Package size={14} /> 导出共享包
+                      </Btn>
+                    </div>
+                  </GlassCard>
+
+                  <GlassCard>
+                    <CardHeader>近期备份</CardHeader>
+                    <div className="p-5">
+                      {backupItems.length === 0 ? (
+                        <p className="text-sm text-gray-400">暂无备份</p>
+                      ) : (
+                        <ul className="space-y-0">
+                          {backupItems.slice(0, 3).map((b) => (
+                            <li key={b.backup_id} className="flex items-center justify-between py-2.5 border-b border-black/5 last:border-0 gap-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-mono font-semibold">{b.backup_id}</p>
+                                <p className="text-[11px] text-gray-400 mt-0.5">{formatUnixMs(b.created_at)} &middot; {b.trigger} &middot; {b.entry_count} 个文件</p>
+                              </div>
+                              <Btn sm onClick={() => void onRestoreBackup(b.backup_id)}><RotateCcw size={12} /> 恢复</Btn>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </GlassCard>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ======= 编辑器 ======= */}
+          {activeView === "editor" && (
+            <motion.div key="editor" {...fadeIn} className="grid grid-cols-[260px_minmax(0,1fr)] gap-4 flex-1 min-h-0">
+              {/* 文件面板 */}
+              <div className="glass rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                <div className="p-4 border-b border-black/5 flex flex-col gap-3">
+                  <div className="flex gap-1 bg-gray-200/60 rounded-lg p-[3px]">
+                    {SCOPE_ITEMS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setScope(s)}
+                        className={cn(
+                          "flex-1 rounded-md py-1.5 px-1 text-xs font-semibold capitalize transition-all cursor-pointer",
+                          scope === s ? "bg-white text-gray-900 shadow-sm" : "text-gray-500 hover:text-gray-700",
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                      className="w-full border border-black/5 rounded-lg py-2 pl-9 pr-3 text-sm bg-white/70 outline-none focus:border-accent focus:ring-2 focus:ring-accent/10 transition-all"
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      placeholder="搜索文件..."
+                    />
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-auto p-2">
+                  <ul className="space-y-[1px]">
+                    {visibleFiles.map((f) => (
+                      <li key={f}>
+                        <button
+                          onClick={() => void openFile(f)}
+                          className={cn(
+                            "w-full text-left rounded-md px-3 py-[7px] text-sm transition-all cursor-pointer",
+                            selectedFile === f ? "bg-accent-bg text-accent font-semibold" : "text-gray-500 hover:bg-black/[0.03] hover:text-gray-800",
+                          )}
+                        >
+                          {f}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-3 border-t border-black/5 flex gap-2">
+                  <Btn sm onClick={() => void onCreateFile()}><Plus size={12} /> 新建</Btn>
+                  <Btn sm danger onClick={() => void onDeleteFile()}><Trash2 size={12} /> 删除</Btn>
+                </div>
+              </div>
+
+              {/* 代码面板 */}
+              <div className="glass rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                {selectedFile ? (
+                  <>
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-black/5 gap-3">
+                      <p className="text-sm font-semibold">
+                        {scope}/{selectedFile}
+                        {dirty && <span className="text-red-500 ml-1">*</span>}
+                      </p>
+                      <Btn sm primary onClick={() => void onSaveFile()}><Save size={12} /> 保存</Btn>
+                    </div>
+                    <textarea
+                      className="code-editor-textarea"
+                      value={fileContent}
+                      onChange={(e) => { setFileContent(e.target.value); setDirty(true); }}
+                    />
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center min-h-[300px] text-gray-400 gap-2">
+                    <FileText size={40} strokeWidth={1} className="opacity-30" />
+                    <p className="text-sm">请在左侧选择文件</p>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ======= 同步 ======= */}
+          {activeView === "sync" && (
+            <motion.div key="sync" {...fadeIn} className="flex flex-col gap-4">
+              <div className="grid grid-cols-[380px_minmax(0,1fr)] gap-4 flex-1">
+                {/* 变更列表 */}
+                <div className="glass rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-3.5 border-b border-black/5">
+                    <h2 className="text-[15px] font-semibold">变更列表</h2>
+                    <Badge variant="yellow">{changedSyncItems.length} 项待处理</Badge>
+                  </div>
+                  <div className="flex gap-4 px-4 py-2.5 border-b border-black/5 text-sm text-gray-500">
+                    <span>变更: <strong className="text-gray-900">{changedSyncItems.length}</strong></span>
+                    <span>已选: <strong className="text-gray-900">{selectedSyncIds.length}</strong></span>
+                  </div>
+                  <ul className="flex-1 overflow-auto">
+                    {changedSyncItems.map((item) => (
+                      <li
+                        key={item.id}
+                        onClick={() => setFocusedSyncId(item.id)}
+                        className={cn(
+                          "flex items-center gap-3 px-4 py-2.5 border-b border-black/5 cursor-pointer transition-colors last:border-0",
+                          focusedSyncId === item.id ? "bg-accent-bg" : "hover:bg-black/[0.02]",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedSyncIds.includes(item.id)}
+                          onChange={() => toggleSyncItem(item.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="accent-accent"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[11px] font-semibold uppercase">{item.agent}</div>
+                          <div className="text-[11px] text-gray-400 truncate">{item.target_relative_path}</div>
+                        </div>
+                        <Badge variant={item.status === "create" ? "green" : "yellow"}>{item.status}</Badge>
+                      </li>
+                    ))}
+                    {changedSyncItems.length === 0 && (
+                      <li className="px-4 py-8 text-center text-sm text-gray-400">点击「生成预览」扫描变更</li>
+                    )}
+                  </ul>
+                  <div className="p-3 border-t border-black/5">
+                    <Btn primary onClick={() => void onApplySync()}><ArrowLeftRight size={14} /> 应用选中项</Btn>
+                  </div>
+                </div>
+
+                {/* 差异面板 */}
+                <div className="glass rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                  {focusedSyncItem ? (
+                    <>
+                      <div className="px-4 py-3.5 border-b border-black/5">
+                        <h2 className="text-[15px] font-semibold">差异对比</h2>
+                        <p className="text-[11px] text-gray-400 mt-1">{focusedSyncItem.source_file} &rarr; {focusedSyncItem.agent}/{focusedSyncItem.target_relative_path}</p>
+                      </div>
+                      <div className="flex-1 grid grid-cols-2 overflow-hidden">
+                        <div className="flex flex-col overflow-hidden border-r border-black/5">
+                          <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-100/60 border-b border-black/5">变更前</div>
+                          <pre className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{focusedSyncItem.before}</pre>
+                        </div>
+                        <div className="flex flex-col overflow-hidden">
+                          <div className="px-4 py-2 text-xs font-semibold text-gray-500 bg-gray-100/60 border-b border-black/5">变更后</div>
+                          <pre className="flex-1 overflow-auto p-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">{focusedSyncItem.after}</pre>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center min-h-[300px] text-gray-400 gap-2">
+                      <Search size={40} strokeWidth={1} className="opacity-30" />
+                      <p className="text-sm">选择一项查看差异</p>
+                    </div>
                   )}
                 </div>
               </div>
-            </div>
-          </>
-        )}
+
+              {/* 映射规则 */}
+              <GlassCard>
+                <CardHeader action={<Btn sm onClick={() => void onSaveMapping()}><Save size={12} /> 保存映射</Btn>}>映射规则</CardHeader>
+                <textarea className="mapping-textarea" value={mappingText} onChange={(e) => setMappingText(e.target.value)} />
+              </GlassCard>
+
+              {/* 共享 & 备份 */}
+              <div className="grid grid-cols-2 gap-4">
+                <GlassCard>
+                  <CardHeader>共享</CardHeader>
+                  <div className="p-5 flex flex-col gap-3">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
+                        <input type="checkbox" checked={sanitizeExport} onChange={(e) => setSanitizeExport(e.target.checked)} className="accent-accent" />
+                        脱敏导出
+                      </label>
+                      <Btn sm primary onClick={() => void onExportShare()}><Download size={12} /> 导出 ZIP</Btn>
+                    </div>
+                    {lastExportPath && <p className="text-[11px] font-mono text-gray-400 break-all">{lastExportPath}</p>}
+                    <hr className="border-black/5" />
+                    <input
+                      className="w-full border border-black/5 rounded-lg py-2 px-3 text-sm bg-white/70 outline-none focus:border-accent focus:ring-2 focus:ring-accent/10 transition-all"
+                      value={importZipPath}
+                      onChange={(e) => setImportZipPath(e.target.value)}
+                      placeholder="输入 zip 绝对路径"
+                    />
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
+                        <input type="checkbox" checked={overwriteImport} onChange={(e) => setOverwriteImport(e.target.checked)} className="accent-accent" />
+                        覆盖已有
+                      </label>
+                      <Btn sm onClick={() => void onPreviewImport()}><Eye size={12} /> 预览</Btn>
+                      <Btn sm primary onClick={() => void onApplyImport()}><Upload size={12} /> 导入</Btn>
+                    </div>
+                    {importPreviewData && (
+                      <ul className="mt-1 border border-black/5 rounded-lg overflow-hidden">
+                        {importPreviewData.files.map((f) => (
+                          <li key={f.relative_path} className="flex items-center gap-3 px-3 py-2 border-b border-black/5 text-sm last:border-0">
+                            <Badge variant={f.status === "create" ? "green" : "yellow"}>{f.status}</Badge>
+                            <span>{f.relative_path}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </GlassCard>
+
+                <GlassCard>
+                  <CardHeader action={<Btn sm onClick={async () => setBackupItems(await listBackups())}><RefreshCw size={12} /> 刷新</Btn>}>备份历史</CardHeader>
+                  <div className="p-5">
+                    {backupItems.length === 0 ? (
+                      <p className="text-sm text-gray-400">暂无备份</p>
+                    ) : (
+                      <ul className="space-y-0">
+                        {backupItems.map((b) => (
+                          <li key={b.backup_id} className="flex items-center justify-between py-2.5 border-b border-black/5 last:border-0 gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-mono font-semibold">{b.backup_id}</p>
+                              <p className="text-[11px] text-gray-400 mt-0.5">{formatUnixMs(b.created_at)} &middot; {b.trigger} &middot; {b.entry_count} 个文件</p>
+                            </div>
+                            <Btn sm onClick={() => void onRestoreBackup(b.backup_id)}><History size={12} /> 恢复</Btn>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </GlassCard>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </main>
     </div>
   );
