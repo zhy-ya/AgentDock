@@ -125,7 +125,7 @@ gh auth login -h github.com
 
 The command will prompt you for:
 
-1. `Version` (for example `0.1.1`)
+1. `Version` (defaults to current patch `+1`, press Enter to accept, e.g. `0.1.0 -> 0.1.1`)
 2. `Release notes` (multi-line, finish with `Ctrl-D`)
 
 Then it will automatically:
