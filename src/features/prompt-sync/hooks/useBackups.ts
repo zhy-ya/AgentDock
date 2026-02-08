@@ -1,11 +1,10 @@
 import { useState, useCallback } from "react";
-import { listBackups, restoreBackup } from "@/api";
+import { listBackups, restoreBackup, deleteBackup } from "@/api";
 import type { BackupInfo } from "@/types";
 
 export function useBackups(
   setStatusMessage: (msg: string) => void,
   setErrorMessage: (msg: string) => void,
-  refreshFiles: () => Promise<string[]>,
 ) {
   const [backupItems, setBackupItems] = useState<BackupInfo[]>([]);
 
@@ -24,19 +23,27 @@ export function useBackups(
       try {
         const r = await restoreBackup(id);
         setStatusMessage(`恢复完成，${r.restored_count} 个文件`);
-        await refreshFiles();
         await refreshBackups();
       } catch (e) {
         setErrorMessage(String(e));
       }
     },
-    [setStatusMessage, setErrorMessage, refreshFiles, refreshBackups],
+    [setStatusMessage, setErrorMessage, refreshBackups],
   );
 
-  return {
-    backupItems,
-    setBackupItems,
-    refreshBackups,
-    restoreBackupAction,
-  };
+  const deleteBackupAction = useCallback(
+    async (id: string) => {
+      if (!window.confirm(`确认删除备份 ${id}？删除后无法恢复。`)) return;
+      try {
+        await deleteBackup(id);
+        setStatusMessage("备份已删除");
+        await refreshBackups();
+      } catch (e) {
+        setErrorMessage(String(e));
+      }
+    },
+    [setStatusMessage, setErrorMessage, refreshBackups],
+  );
+
+  return { backupItems, refreshBackups, restoreBackupAction, deleteBackupAction };
 }

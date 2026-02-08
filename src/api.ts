@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ApplySyncResult,
+  BackupDetail,
   BackupInfo,
   FileContent,
   RestoreResult,
@@ -47,4 +48,12 @@ export function listBackups() {
 
 export function restoreBackup(backupId: string) {
   return invoke<RestoreResult>("restore_backup", { backupId });
+}
+
+export function deleteBackup(backupId: string) {
+  return invoke<void>("delete_backup", { backupId });
+}
+
+export function getBackupDetail(backupId: string) {
+  return invoke<BackupDetail>("get_backup_detail", { backupId });
 }

@@ -71,3 +71,18 @@ export interface BackupInfo {
 export interface RestoreResult {
   restored_count: number;
 }
+
+export interface BackupDetailEntry {
+  agent: string;
+  target_relative_path: string;
+  existed_before: boolean;
+  backup_content: string | null;
+  current_content: string | null;
+}
+
+export interface BackupDetail {
+  backup_id: string;
+  created_at: number;
+  trigger: string;
+  entries: BackupDetailEntry[];
+}

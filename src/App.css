@@ -43,9 +43,3 @@
   background: oklch(0.98 0 0 / 0.7);
   min-height: 300px;
 }
-
-/* Diff viewer overrides */
-table.diff-viewer-table {
-  width: 100%;
-  font-size: 12px;
-}
